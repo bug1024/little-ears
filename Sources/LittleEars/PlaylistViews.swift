@@ -1,0 +1,197 @@
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct PlaylistNameSheet: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) var dismiss
+    let draft: PlaylistDraft
+    @State private var name: String
+    @State private var error: String?
+    @State private var saving = false
+    init(draft: PlaylistDraft) { self.draft = draft; _name = State(initialValue: draft.name) }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(draft.playlistID == nil ? "新建播放列表" : "重命名播放列表").font(.title3.weight(.semibold))
+            TextField("例如：每天听一遍", text: $name).textFieldStyle(.roundedBorder).onSubmit(save)
+            if draft.playlistID == nil {
+                Text(draft.trackIDs.isEmpty ? "创建后，可从音乐库多选歌曲加入。" : "按当前顺序保存 \(draft.trackIDs.count) 首音频。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+            HStack {
+                Spacer()
+                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction).disabled(saving)
+                Button(saving ? "正在保存…" : "保存", action: save).keyboardShortcut(.defaultAction)
+                    .disabled(saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.savingPlaylists)
+            }
+        }.padding(25).frame(width: 380)
+    }
+    private func save() {
+        guard !saving else { return }
+        saving = true
+        Task {
+            defer { saving = false }
+            do {
+                if let id = draft.playlistID, let playlist = model.playlists.first(where: { $0.id == id }) {
+                    try await model.renamePlaylist(playlist, name: name)
+                } else { try await model.createPlaylist(name: name, trackIDs: draft.trackIDs) }
+                dismiss()
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+}
+
+/// Selection is resolved against visible rows so a single unselected context-click targets that row.
+struct AddToPlaylistMenu: View {
+    @EnvironmentObject var model: AppModel
+    let trackIDs: [String]
+    var body: some View {
+        Menu {
+            Button("新建播放列表…") { model.draftPlaylist(trackIDs: trackIDs) }
+            if !model.playlists.isEmpty {
+                Divider()
+                ForEach(model.playlists) { playlist in
+                    Button(playlist.name) {
+                        Task {
+                            do { try await model.appendTracks(trackIDs, to: playlist) }
+                            catch { model.errorMessage = error.localizedDescription }
+                        }
+                    }
+                }
+            }
+        } label: { Label("加入播放列表", systemImage: "text.badge.plus") }
+            .disabled(trackIDs.isEmpty || model.savingPlaylists || !model.ready)
+    }
+}
+struct SaveQueueMenu: View {
+    @EnvironmentObject var model: AppModel
+    @State private var replacing: Playlist?
+    var body: some View {
+        Menu {
+            Button("另存为新播放列表…") { model.draftPlaylist(trackIDs: model.queue.map(\.trackID)) }
+            if !model.playlists.isEmpty {
+                Menu("覆盖已有播放列表") {
+                    ForEach(model.playlists) { playlist in Button(playlist.name) { replacing = playlist } }
+                }
+            }
+        } label: { Label("保存队列", systemImage: "square.and.arrow.down") }
+            .menuStyle(.borderlessButton).fixedSize().font(.system(size: 11))
+            .disabled(model.queue.isEmpty || model.savingPlaylists)
+            .alert("保存到「\(replacing?.name ?? "")」？", isPresented: Binding(get: { replacing != nil }, set: { if !$0 { replacing = nil } })) {
+                Button("取消", role: .cancel) { replacing = nil }
+                Button("保存") {
+                    guard let playlist = replacing else { return }
+                    let trackIDs = model.queue.map(\.trackID)
+                    replacing = nil
+                    Task {
+                        do { try await model.replacePlaylistTracks(playlist, trackIDs: trackIDs) }
+                        catch { model.errorMessage = error.localizedDescription }
+                    }
+                }
+            } message: { Text("将用当前队列的歌曲和顺序替换这个播放列表。正在播放的音频会继续播放。") }
+    }
+}
+struct PlaylistsView: View {
+    @EnvironmentObject var model: AppModel
+    let palette: Palette
+    @State private var selection = Set<String>()
+    @State private var deleting = false
+    var playlist: Playlist? { model.selectedPlaylist }
+    var entries: [PlaylistItem] { playlist.map { model.items(in: $0.id) } ?? [] }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("YOUR OWN ORDER").font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(2).foregroundStyle(palette.secondary)
+                    Text(playlist?.name ?? "我的播放列表").font(.system(size: 29, weight: .semibold)).lineLimit(2)
+                    Text(playlist == nil ? "挑选喜欢的音频，按自己的顺序听。" : "\(entries.count) 首音频 · 拖拽排序，自动保存")
+                        .font(.system(size: 12)).foregroundStyle(palette.secondary)
+                }
+                Spacer()
+                Button { model.draftPlaylist() } label: { Label("新建列表", systemImage: "plus") }.buttonStyle(.bordered).controlSize(.large).disabled(model.savingPlaylists || !model.ready)
+            }.padding(.bottom, 26)
+            if let playlist {
+                HStack(spacing: 12) {
+                    Button { model.playPlaylist(playlist) } label: { Label("按顺序播放", systemImage: "play.fill") }.buttonStyle(.borderedProminent).disabled(entries.isEmpty)
+                    Button { model.page = "library" } label: { Label("挑选歌曲", systemImage: "plus") }.buttonStyle(.bordered)
+                    Spacer()
+                    if model.savingPlaylists { ProgressView().controlSize(.small) }
+                    Menu {
+                        Button("重命名…") { model.playlistDraft = PlaylistDraft(playlistID: playlist.id, name: playlist.name) }
+                        Button("删除播放列表…", role: .destructive) { deleting = true }
+                    } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize().disabled(model.savingPlaylists)
+                }.padding(.bottom, 18)
+                if entries.isEmpty { emptyState("这个列表还没有歌曲", detail: "到音乐库中多选音频，点击「加入播放列表」。") }
+                else {
+                    List(selection: $selection) {
+                        ForEach(Array(entries.enumerated()), id: \.element.id) { index, item in
+                            row(item, index: index).tag(item.id).listRowSeparator(.hidden).listRowBackground(Color.clear)
+                                .onTapGesture(count: 2) { model.playPlaylist(playlist, at: item.id) }
+                                .contextMenu {
+                                    Button("从这里播放") { model.playPlaylist(playlist, at: item.id) }
+                                    Button("从列表移除", role: .destructive) {
+                                        let ids = selection.contains(item.id) ? selection : [item.id]
+                                        Task {
+                                            do { try await model.removePlaylistItems(in: playlist, ids: ids); selection.subtract(ids) }
+                                            catch { model.errorMessage = error.localizedDescription }
+                                        }
+                                    }.disabled(model.savingPlaylists)
+                                    if let track = model.tracks.first(where: { $0.id == item.trackID }) { Button("在 Finder 中显示") { model.reveal(track) } }
+                                }
+                                .onDrag { NSItemProvider(object: item.id as NSString) }
+                                .onDrop(of: [.text], isTargeted: nil) { providers in
+                                    guard !model.savingPlaylists, let provider = providers.first else { return false }
+                                    _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+                                        guard let id = object as? String else { return }
+                                        Task { @MainActor in
+                                            let items = model.items(in: playlist.id)
+                                            guard let from = items.firstIndex(where: { $0.id == id }), let to = items.firstIndex(where: { $0.id == item.id }), from != to else { return }
+                                            do { try await model.movePlaylistItems(in: playlist, from: IndexSet(integer: from), to: from < to ? to + 1 : to) }
+                                            catch { model.errorMessage = error.localizedDescription }
+                                        }
+                                    }
+                                    return true
+                                }
+                        }
+                    }.listStyle(.plain).scrollContentBackground(.hidden)
+                    Text("只保存歌曲引用与顺序，不修改原始音频。列表内允许重复歌曲。")
+                        .font(.system(size: 10)).foregroundStyle(palette.secondary).padding(.vertical, 12)
+                }
+            } else { emptyState("给喜欢的音乐，排一个顺序", detail: "先创建播放列表，或者将正在播放的队列保存下来。") }
+        }.padding(.horizontal, 32).padding(.top, 32)
+            .onChange(of: playlist?.id) { _, _ in selection.removeAll() }
+            .alert("删除「\(playlist?.name ?? "")」？", isPresented: $deleting) {
+                Button("取消", role: .cancel) {}
+                Button("删除", role: .destructive) {
+                    guard let playlist else { return }
+                    Task {
+                        do { try await model.deletePlaylist(playlist) }
+                        catch { model.errorMessage = error.localizedDescription }
+                    }
+                }
+            } message: { Text("只删除播放列表，原始音频、播放记录和当前队列都会保留。") }
+    }
+    private func emptyState(_ title: String, detail: String) -> some View {
+        VStack(spacing: 18) {
+            Spacer()
+            Image(systemName: "music.note.list").font(.system(size: 48, weight: .light)).foregroundStyle(palette.accent)
+            Text(title).font(.system(size: 22, weight: .medium))
+            Text(detail).font(.system(size: 12)).foregroundStyle(palette.secondary).multilineTextAlignment(.center)
+            Spacer()
+        }.frame(maxWidth: .infinity)
+    }
+    private func row(_ item: PlaylistItem, index: Int) -> some View {
+        let track = model.tracks.first { $0.id == item.trackID }
+        return HStack(spacing: 14) {
+            Image(systemName: "line.3.horizontal").font(.system(size: 10)).foregroundStyle(palette.secondary.opacity(0.6))
+            Text(String(format: "%02d", index + 1)).font(.system(size: 11, design: .monospaced)).foregroundStyle(palette.secondary).frame(width: 24)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(track?.title ?? "音频不可用").font(.system(size: 13, weight: .medium)).lineLimit(1)
+                Text(track.map { $0.available ? ($0.folder.isEmpty ? "本地音频" : $0.folder) : "文件不可用 · 历史记录保留" } ?? "音乐库记录不可用")
+                    .font(.system(size: 10)).foregroundStyle(palette.secondary).lineLimit(1)
+            }
+            Spacer()
+            Text(timeLabel(track?.duration ?? 0)).font(.system(size: 11, design: .monospaced)).foregroundStyle(palette.secondary)
+        }.padding(.vertical, 12).contentShape(Rectangle())
+    }
+}

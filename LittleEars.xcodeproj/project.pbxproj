@@ -1,0 +1,56 @@
+// !$*UTF8*$!
+{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
+4AE4A885EF26CC9F4DA548B8 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+3B1BD0D3E3B196288B17828C = { isa = PBXBuildFile; fileRef = 4AE4A885EF26CC9F4DA548B8; };
+BE6A0E19A503943BB9A38947 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Database.swift; sourceTree = "<group>"; };
+F52CD319F95264B3DC8EFCB2 = { isa = PBXBuildFile; fileRef = BE6A0E19A503943BB9A38947; };
+4F602D7E5692CBF53F83E485 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FLACMetadata.swift; sourceTree = "<group>"; };
+88E897F5D7AAB4ED7BFD1B87 = { isa = PBXBuildFile; fileRef = 4F602D7E5692CBF53F83E485; };
+6F4422DA4486B5B964130284 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileScanner.swift; sourceTree = "<group>"; };
+F9AEE49D1E65279BCECC82DF = { isa = PBXBuildFile; fileRef = 6F4422DA4486B5B964130284; };
+FC82EB14533210E234B832BD = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LittleEarsApp.swift; sourceTree = "<group>"; };
+D37570B36A09DAEE05DD14D0 = { isa = PBXBuildFile; fileRef = FC82EB14533210E234B832BD; };
+8BF4A28E43F6CF370D3EE1C2 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+487C502A5481E87001E8CC43 = { isa = PBXBuildFile; fileRef = 8BF4A28E43F6CF370D3EE1C2; };
+98BF391332CD6FA75BDEFA86 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackEngine.swift; sourceTree = "<group>"; };
+FB920FA72F4A6013E0D99BE9 = { isa = PBXBuildFile; fileRef = 98BF391332CD6FA75BDEFA86; };
+FC30632AEA9DE8946AF4AC9A = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistViews.swift; sourceTree = "<group>"; };
+5B44A12E57BF02934D2A5088 = { isa = PBXBuildFile; fileRef = FC30632AEA9DE8946AF4AC9A; };
+B64F0C6B0BB6506E71115544 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewRenderer.swift; sourceTree = "<group>"; };
+34892CB13D33A5830C855BF6 = { isa = PBXBuildFile; fileRef = B64F0C6B0BB6506E71115544; };
+09F61F0FC73D14B7A5181A70 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+A04FAA10422B27AC5681DB27 = { isa = PBXBuildFile; fileRef = 09F61F0FC73D14B7A5181A70; };
+A9BCA438417D62B8BB39B2EE = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
+4AF090DF56D724E72C1CAF6A = { isa = PBXBuildFile; fileRef = A9BCA438417D62B8BB39B2EE; };
+38A007151ABE87CC01A5B6E9 = { isa = PBXFileReference; explicitFileType = wrapper.application; path = "Little Ears.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+BCE16DD0260827ECF338C787 = { isa = PBXGroup; path = Sources/LittleEars; sourceTree = "<group>"; children = (4AE4A885EF26CC9F4DA548B8,BE6A0E19A503943BB9A38947,4F602D7E5692CBF53F83E485,6F4422DA4486B5B964130284,FC82EB14533210E234B832BD,8BF4A28E43F6CF370D3EE1C2,98BF391332CD6FA75BDEFA86,FC30632AEA9DE8946AF4AC9A,B64F0C6B0BB6506E71115544,09F61F0FC73D14B7A5181A70,A9BCA438417D62B8BB39B2EE); };
+F8995BA5891B07E328C60D6B = { isa = PBXFileReference; lastKnownFileType = image.icns; path = Resources/AppIcon.icns; sourceTree = "<group>"; };
+74C2431FE30C4A47C8443B80 = { isa = PBXBuildFile; fileRef = F8995BA5891B07E328C60D6B; };
+0112DAE3F84CB4DF5179BE01 = { isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Resources/Info.plist; sourceTree = "<group>"; };
+FBDC4F23F93125BBEEAE800C = { isa = PBXGroup; name = Products; sourceTree = "<group>"; children = (38A007151ABE87CC01A5B6E9); };
+64292B1C2B2E13EAD8788FC8 = { isa = PBXGroup; sourceTree = "<group>"; children = (BCE16DD0260827ECF338C787,F8995BA5891B07E328C60D6B,0112DAE3F84CB4DF5179BE01,FBDC4F23F93125BBEEAE800C); };
+582681C2EAE02B3F3D399C0C = { isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/groue/GRDB.swift.git"; requirement = { kind = exactVersion; version = 7.0.0; }; };
+E9FAD0C6CD43534327C0AF90 = { isa = XCSwiftPackageProductDependency; package = 582681C2EAE02B3F3D399C0C; productName = GRDB; };
+C2D6E87B6138A50797503505 = { isa = PBXBuildFile; productRef = E9FAD0C6CD43534327C0AF90; };
+D3C3E067FC1BBCCEAA4D9313 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (3B1BD0D3E3B196288B17828C,F52CD319F95264B3DC8EFCB2,88E897F5D7AAB4ED7BFD1B87,F9AEE49D1E65279BCECC82DF,D37570B36A09DAEE05DD14D0,487C502A5481E87001E8CC43,FB920FA72F4A6013E0D99BE9,5B44A12E57BF02934D2A5088,34892CB13D33A5830C855BF6,A04FAA10422B27AC5681DB27,4AF090DF56D724E72C1CAF6A); runOnlyForDeploymentPostprocessing = 0; };
+BEE832DE65DB5CA7507F7EF9 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (C2D6E87B6138A50797503505); runOnlyForDeploymentPostprocessing = 0; };
+ECE2D868E17AEF81A05610A3 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (74C2431FE30C4A47C8443B80); runOnlyForDeploymentPostprocessing = 0; };
+89E1FD6268CC0F221A2BE178 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { MACOSX_DEPLOYMENT_TARGET = 14.0; SDKROOT = macosx; SWIFT_VERSION = 5.0; }; };
+7082CC0B6FC1282FCEABD07A = { isa = XCBuildConfiguration; name = Debug; buildSettings = {
+        PRODUCT_NAME = "Little Ears"; PRODUCT_BUNDLE_IDENTIFIER = com.bug1024.littleears;
+        INFOPLIST_FILE = Resources/Info.plist; GENERATE_INFOPLIST_FILE = NO;
+        CODE_SIGN_IDENTITY = "-"; CODE_SIGN_STYLE = Manual; ENABLE_APP_SANDBOX = NO;
+        COMBINE_HIDPI_IMAGES = YES; EXECUTABLE_NAME = LittleEars; PRODUCT_MODULE_NAME = LittleEars; ENABLE_DEBUG_DYLIB = NO; ALWAYS_SEARCH_USER_PATHS = NO; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+        SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; }; };
+E6DE6C99132752C914FEF632 = { isa = XCBuildConfiguration; name = Release; buildSettings = { MACOSX_DEPLOYMENT_TARGET = 14.0; SDKROOT = macosx; SWIFT_VERSION = 5.0; }; };
+639A7CA24D39909E713B47F7 = { isa = XCBuildConfiguration; name = Release; buildSettings = {
+        PRODUCT_NAME = "Little Ears"; PRODUCT_BUNDLE_IDENTIFIER = com.bug1024.littleears;
+        INFOPLIST_FILE = Resources/Info.plist; GENERATE_INFOPLIST_FILE = NO;
+        CODE_SIGN_IDENTITY = "-"; CODE_SIGN_STYLE = Manual; ENABLE_APP_SANDBOX = NO;
+        COMBINE_HIDPI_IMAGES = YES; EXECUTABLE_NAME = LittleEars; PRODUCT_MODULE_NAME = LittleEars; ENABLE_DEBUG_DYLIB = NO; ALWAYS_SEARCH_USER_PATHS = NO; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+        SWIFT_OPTIMIZATION_LEVEL = "-O"; }; };
+862894B703A6DEDF96A9DD6C = { isa = XCConfigurationList; buildConfigurations = (89E1FD6268CC0F221A2BE178,E6DE6C99132752C914FEF632); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+C57128001CE614BF8549D6BB = { isa = XCConfigurationList; buildConfigurations = (7082CC0B6FC1282FCEABD07A,639A7CA24D39909E713B47F7); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+0E8A3AD980EC179856012B7E = { isa = PBXNativeTarget; name = LittleEars; productName = "Little Ears"; productReference = 38A007151ABE87CC01A5B6E9; productType = "com.apple.product-type.application"; buildConfigurationList = C57128001CE614BF8549D6BB; buildPhases = (D3C3E067FC1BBCCEAA4D9313,BEE832DE65DB5CA7507F7EF9,ECE2D868E17AEF81A05610A3); buildRules = (); dependencies = (); packageProductDependencies = (E9FAD0C6CD43534327C0AF90); };
+98F54143AB4E86B28C3AFEE0 = { isa = PBXProject; attributes = { LastUpgradeCheck = 1600; }; buildConfigurationList = 862894B703A6DEDF96A9DD6C; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = 64292B1C2B2E13EAD8788FC8; productRefGroup = FBDC4F23F93125BBEEAE800C; projectDirPath = ""; projectRoot = ""; targets = (0E8A3AD980EC179856012B7E); packageReferences = (582681C2EAE02B3F3D399C0C); };
+}; rootObject = 98F54143AB4E86B28C3AFEE0; }

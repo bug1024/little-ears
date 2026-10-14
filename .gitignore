@@ -1,0 +1,18 @@
+# Swift / Xcode build outputs
+.build/
+.swiftpm/
+build/
+DerivedData/
+
+# Per-user Xcode state
+xcuserdata/
+*.xcuserstate
+
+# macOS metadata
+.DS_Store
+
+# Local configuration and diagnostic logs
+.env
+.env.*
+!.env.example
+*.log
