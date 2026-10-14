@@ -294,10 +294,11 @@ struct PlaybackKeyboardShortcuts: NSViewRepresentable {
         case togglePlayback, previous, next, volumeUp, volumeDown
         var allowsRepeat: Bool { self == .volumeUp || self == .volumeDown }
     }
+    var playingPage: Bool
     var action: (Command) -> Void
-    func makeNSView(context: Context) -> MonitorView { MonitorView(action: action) }
-    func updateNSView(_ view: MonitorView, context: Context) { view.action = action }
-    static func command(for event: NSEvent, responder: NSResponder?, hasSheet: Bool) -> Command? {
+    func makeNSView(context: Context) -> MonitorView { MonitorView(playingPage: playingPage, action: action) }
+    func updateNSView(_ view: MonitorView, context: Context) { view.playingPage = playingPage; view.action = action }
+    static func command(for event: NSEvent, responder: NSResponder?, hasSheet: Bool, playingPage: Bool = false) -> Command? {
         guard !hasSheet, event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else { return nil }
         let command: Command
         switch event.keyCode {
@@ -308,12 +309,13 @@ struct PlaybackKeyboardShortcuts: NSViewRepresentable {
         case 126: command = .volumeUp
         default: return nil
         }
+        guard command == .togglePlayback || playingPage else { return nil }
         // A field editor keeps cursor keys; space on a focused button still activates it.
         var view = responder as? NSView
         while let current = view {
             if current is NSTextView || current is NSTextField || current is NSPopUpButton { return nil }
             if command == .togglePlayback && current is NSButton { return nil }
-            if command != .togglePlayback && current is NSSlider { return nil }
+            if command != .togglePlayback && (current is NSSlider || current is NSTableView || current is NSOutlineView || current is NSCollectionView) { return nil }
             view = current.superview
         }
         return command
@@ -322,9 +324,10 @@ struct PlaybackKeyboardShortcuts: NSViewRepresentable {
         command(for: event, responder: responder, hasSheet: hasSheet) != nil
     }
     final class MonitorView: NSView {
+        var playingPage: Bool
         var action: (Command) -> Void
         private var monitor: Any?
-        init(action: @escaping (Command) -> Void) { self.action = action; super.init(frame: .zero) }
+        init(playingPage: Bool, action: @escaping (Command) -> Void) { self.playingPage = playingPage; self.action = action; super.init(frame: .zero) }
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
         override func viewDidMoveToWindow() {
@@ -333,7 +336,7 @@ struct PlaybackKeyboardShortcuts: NSViewRepresentable {
             guard monitor == nil else { return }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self, let window = self.window, window.isKeyWindow, event.window === window,
-                      let command = PlaybackKeyboardShortcuts.command(for: event, responder: window.firstResponder, hasSheet: window.attachedSheet != nil) else { return event }
+                      let command = PlaybackKeyboardShortcuts.command(for: event, responder: window.firstResponder, hasSheet: window.attachedSheet != nil, playingPage: self.playingPage) else { return event }
                 if !event.isARepeat || command.allowsRepeat { self.action(command) }
                 return nil
             }

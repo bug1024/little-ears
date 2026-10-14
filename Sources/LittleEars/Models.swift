@@ -138,3 +138,72 @@ struct PlaylistDraft: Identifiable {
     var name = ""
     var trackIDs: [String] = []
 }
+
+struct TrackDetailsTarget: Identifiable {
+    var id: String
+    var track: Track?
+}
+struct TrackStatistics: FetchableRecord, Decodable, Sendable {
+    var seconds: Double
+    var completions: Int
+    var lastPlayedAt: Date?
+    var listeningDays: Int
+    static let empty = TrackStatistics(seconds: 0, completions: 0, lastPlayedAt: nil, listeningDays: 0)
+}
+struct TrackListeningRecord: FetchableRecord, Decodable, Sendable, Identifiable {
+    var id: String
+    var startedAt: Date
+    var seconds: Double
+    var completed: Bool
+}
+struct TrackHistoryCursor: Sendable {
+    var startedAt: Date
+    var id: String
+    init(_ record: TrackListeningRecord) { startedAt = record.startedAt; id = record.id }
+}
+struct TrackHistoryPage: Sendable {
+    var records: [TrackListeningRecord]
+    var hasMore: Bool
+}
+struct TrackStatisticsDetails: Sendable {
+    var summary: TrackStatistics
+    var days: [DailyStat]
+    var history: TrackHistoryPage
+}
+enum TrackStatisticsPeriod: Int, CaseIterable, Identifiable {
+    case week = 7, month = 30, all = 0
+    var id: Int { rawValue }
+    var title: String { switch self { case .week: "最近 7 天"; case .month: "最近 30 天"; case .all: "全部" } }
+    func startDay(now: Date = Date(), calendar: Calendar = .current) -> String? {
+        guard self != .all else { return nil }
+        let start = calendar.date(byAdding: .day, value: -(rawValue - 1), to: calendar.startOfDay(for: now))!
+        return ListeningClock.day(start, calendar: calendar)
+    }
+}
+
+struct DailyListeningStat: FetchableRecord, Decodable, Sendable, Identifiable {
+    var day: String
+    var seconds: Double
+    var completions: Int
+    var id: String { day }
+}
+struct YearlyListeningStats: Sendable {
+    var days: [DailyListeningStat]
+    var years: [Int]
+}
+struct DailyTrackListeningStat: Sendable, Identifiable {
+    var id: String
+    var track: Track?
+    var seconds: Double
+    var completions: Int
+}
+struct DailyListeningDetails: Sendable {
+    var day: String
+    var seconds: Double
+    var completions: Int
+    var tracks: [DailyTrackListeningStat]
+}
+
+func listeningDateLabel(_ date: Date) -> String {
+    date.formatted(.dateTime.locale(Locale(identifier: "zh_CN")).year().month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+}

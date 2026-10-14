@@ -32,7 +32,7 @@ struct ContentView: View {
                 }
             }
         }.background(palette.background).foregroundStyle(palette.text).tint(palette.accent)
-            .font(.system(size: 12)).controlSize(.small).buttonStyle(InstrumentButtonStyle())
+            .font(.system(size: 12)).controlSize(.small).buttonStyle(.bordered)
             .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
             .frame(minWidth: 900, minHeight: 600)
             .onAppear { model.setSpectrumWindowVisible(true); model.setSpectrumEnabled(spectrumEnabled) }
@@ -49,6 +49,8 @@ struct ContentView: View {
                     }
                 }
             } message: { Text("只删除播放列表，原始音频、播放记录和当前队列都会保留。") }
+            .sheet(item: $model.listeningDayTarget) { day in DailyListeningDetailsView(day: day).environmentObject(model).environment(\.colorScheme, scheme) }
+            .sheet(item: $model.trackDetailsTarget) { target in TrackStatisticsView(target: target).environmentObject(model).environment(\.colorScheme, scheme) }
             .sheet(item: $model.playlistDraft) { draft in PlaylistNameSheet(draft: draft).environmentObject(model).environment(\.colorScheme, scheme) }
             .alert("Little Ears", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
                 Button("知道了", role: .cancel) { model.errorMessage = nil }
@@ -110,7 +112,7 @@ struct ContentView: View {
                 Circle().fill(model.isPlaying ? palette.accent : palette.tertiary).frame(width: 4, height: 4)
                 Text(model.isPlaying ? "正在播放 · 本地音频" : "本地音频 · 离线音乐库").font(.system(size: 10)).foregroundStyle(palette.secondary)
                 Spacer(minLength: 0)
-                Button { openSettings() } label: { Image(systemName: "gearshape").font(.system(size: 12)) }.buttonStyle(InstrumentButtonStyle(compact: true)).help("设置 · ⌘,")
+                Button { openSettings() } label: { Image(systemName: "gearshape").font(.system(size: 12)) }.buttonStyle(.bordered).help("设置 · ⌘,")
             }.padding(.horizontal, 12).frame(height: 38).overlay(alignment: .top) { Rectangle().fill(palette.border).frame(height: 1) }
         }.background(LinearGradient(colors: [palette.elevated.opacity(0.5), palette.sidebar, palette.background], startPoint: .topLeading, endPoint: .bottomTrailing))
     }
@@ -118,7 +120,7 @@ struct ContentView: View {
         HStack {
             Text(title).font(.system(size: 10, weight: .semibold)).foregroundStyle(palette.secondary)
             Spacer()
-            Button(action: action) { Image(systemName: "plus").font(.system(size: 10)) }.buttonStyle(InstrumentButtonStyle(compact: true)).disabled(!model.ready || model.scanning || model.savingPlaylists).help(title == "播放列表" ? "新建播放列表" : "添加目录")
+            Button(action: action) { Image(systemName: "plus").font(.system(size: 10)) }.buttonStyle(.bordered).disabled(!model.ready || model.scanning || model.savingPlaylists).help(title == "播放列表" ? "新建播放列表" : "添加目录")
         }.padding(.leading, 8).padding(.top, 13).padding(.bottom, 3)
     }
     private func nav(_ title: String, icon: String, page: String, count: Int?) -> some View {
@@ -192,14 +194,14 @@ struct LibraryView: View {
                     Text("添加你的音乐目录").font(.system(size: 17, weight: .medium))
                     Text("音频保留在原处，支持 MP3、M4A、WAV、AIFF、CAF 和 FLAC。")
                         .font(.system(size: 11)).foregroundStyle(palette.secondary)
-                    Button("选择文件夹…", action: model.importFolders).buttonStyle(InstrumentButtonStyle(prominent: true)).disabled(!model.ready || model.scanning)
+                    Button("选择文件夹…", action: model.importFolders).buttonStyle(.borderedProminent).disabled(!model.ready || model.scanning)
                     Spacer()
                 }.frame(maxWidth: .infinity)
             } else {
                 HStack(spacing: 10) {
                     Button { model.start(selectedIDs.isEmpty ? visible : visible.filter { selection.contains($0.id) }) } label: { Label(selectedIDs.isEmpty ? "播放" : "播放所选", systemImage: "play.fill") }.disabled(visible.isEmpty)
                     AddToPlaylistMenu(trackIDs: selectedIDs).menuStyle(.borderlessButton).fixedSize()
-                    Button(action: model.refreshAll) { Image(systemName: "arrow.clockwise") }.buttonStyle(InstrumentButtonStyle(compact: true)).help("刷新音乐库").disabled(model.scanning)
+                    Button(action: model.refreshAll) { Image(systemName: "arrow.clockwise") }.buttonStyle(.bordered).help("刷新音乐库").disabled(model.scanning)
                     if model.selectedFolder != nil { Toggle("子目录", isOn: $model.includeChildren).toggleStyle(.checkbox).font(.system(size: 11)) }
                     Spacer(minLength: 6)
                     Picker("排序", selection: $model.sortByDuration) { Text("名称").tag(false); Text("时长").tag(true) }.labelsHidden().frame(width: 77)
@@ -224,7 +226,10 @@ struct LibraryView: View {
                         else if let track = targets.first { model.start(visible, at: track) }
                     }.disabled(targets.isEmpty)
                     AddToPlaylistMenu(trackIDs: targets.map(\.id))
-                    if targets.count == 1, let track = targets.first { Button("在 Finder 中显示") { model.reveal(track) } }
+                    if targets.count == 1, let track = targets.first {
+                        Button("查看收听统计") { model.showTrackStatistics(track.id) }
+                        Button("在 Finder 中显示") { model.reveal(track) }
+                    }
                 } primaryAction: { ids in
                     if let track = visible.first(where: { ids.contains($0.id) }) { model.start(visible, at: track) }
                 }.listStyle(.plain).scrollContentBackground(.hidden).contentMargins(.horizontal, 0, for: .scrollContent)
@@ -294,6 +299,7 @@ struct PlayerBar: View {
                 if model.page == "playing" { Spacer(minLength: 0) }
                 else { PlaybackProgress(palette: palette).frame(maxWidth: .infinity) }
                 HStack(spacing: 9) {
+                    SleepTimerButton(timer: model.sleepTimer, palette: palette, hasTrack: model.currentTrack != nil)
                     Button(action: model.cycleMode) { Image(systemName: model.mode.symbol).font(.system(size: 12)).foregroundStyle(model.mode == .sequential ? palette.secondary : palette.accent) }.buttonStyle(InstrumentButtonStyle(compact: true)).help(model.mode.title)
                     Image(systemName: model.volume == 0 ? "speaker.slash" : "speaker.wave.2").font(.system(size: 10)).foregroundStyle(palette.secondary)
                     MaterialSlider(value: Binding(get: { Double(model.volume) }, set: { model.volume = Float($0) }), range: 0...1, palette: palette).frame(width: model.page == "playing" ? 110 : 60, height: 18).accessibilityLabel("音量")
@@ -494,6 +500,7 @@ struct StatisticsView: View {
                         Rectangle().fill(palette.border).frame(width: 1).padding(.vertical, 16)
                         stat("完整播放", value: "\(model.stats.completions) 次")
                     }.frame(height: 78).modifier(PanelStyle(palette: palette))
+                    ListeningFootprintView(palette: palette)
                     VStack(alignment: .leading, spacing: 15) {
                         HStack { Text("最近 7 天").font(.system(size: 12, weight: .medium)); Spacer(); Text("分钟").font(.system(size: 10)).foregroundStyle(palette.secondary) }
                         Chart(days) { day in BarMark(x: .value("日期", String(day.day.suffix(5))), y: .value("分钟", day.seconds / 60)).foregroundStyle(palette.accent.opacity(0.7)).cornerRadius(2) }
@@ -507,13 +514,15 @@ struct StatisticsView: View {
                             .font(.system(size: 10)).foregroundStyle(palette.secondary).frame(height: 27).overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
                         if model.stats.tracks.isEmpty { Text("暂无播放记录").font(.system(size: 11)).foregroundStyle(palette.secondary).frame(maxWidth: .infinity).frame(height: 60) }
                         ForEach(Array(model.stats.tracks.prefix(20).enumerated()), id: \.element.trackID) { index, item in
-                            HStack {
+                            Button { model.showTrackStatistics(item.trackID) } label: {
+                              HStack {
                                 Text(String(format: "%02d", index + 1)).font(.system(size: 10)).monospacedDigit().foregroundStyle(palette.tertiary).frame(width: 26, alignment: .leading)
                                 Text(model.tracks.first { $0.id == item.trackID }?.title ?? "历史音频").font(.system(size: 12)).lineLimit(1)
                                 Spacer()
                                 Text("\(item.completions)").frame(width: 80, alignment: .trailing)
                                 Text(listeningLabel(item.seconds)).frame(width: 125, alignment: .trailing)
-                            }.font(.system(size: 11)).monospacedDigit().frame(height: 32).background(index.isMultiple(of: 2) ? palette.surface.opacity(0.5) : .clear)
+                              }.font(.system(size: 11)).monospacedDigit().frame(height: 32).background(index.isMultiple(of: 2) ? palette.surface.opacity(0.5) : .clear).contentShape(Rectangle())
+                            }.buttonStyle(.plain).modifier(HoverHighlight()).help("查看收听统计")
                         }
                     }.padding(16).modifier(PanelStyle(palette: palette))
                 }.padding(20)
@@ -541,7 +550,7 @@ struct SettingsView: View {
                 Image(systemName: "ear.badge.waveform").font(.system(size: 23)).foregroundStyle(palette.accent)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Little Ears").font(.system(size: 15, weight: .semibold))
-                    Text("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.4.5") · 本地音频播放器").font(.system(size: 10)).foregroundStyle(palette.secondary)
+                    Text("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.5.0") · 本地音频播放器").font(.system(size: 10)).foregroundStyle(palette.secondary)
                 }
                 Spacer()
             }.frame(height: 36)

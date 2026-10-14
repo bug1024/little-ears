@@ -2,12 +2,18 @@
 { archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
 4AE4A885EF26CC9F4DA548B8 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 3B1BD0D3E3B196288B17828C = { isa = PBXBuildFile; fileRef = 4AE4A885EF26CC9F4DA548B8; };
+275F2A1348EC6169F5F08525 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyListeningDetailsView.swift; sourceTree = "<group>"; };
+322FD32B188EB96A5DE291EE = { isa = PBXBuildFile; fileRef = 275F2A1348EC6169F5F08525; };
 BE6A0E19A503943BB9A38947 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Database.swift; sourceTree = "<group>"; };
 F52CD319F95264B3DC8EFCB2 = { isa = PBXBuildFile; fileRef = BE6A0E19A503943BB9A38947; };
 4F602D7E5692CBF53F83E485 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FLACMetadata.swift; sourceTree = "<group>"; };
 88E897F5D7AAB4ED7BFD1B87 = { isa = PBXBuildFile; fileRef = 4F602D7E5692CBF53F83E485; };
 6F4422DA4486B5B964130284 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileScanner.swift; sourceTree = "<group>"; };
 F9AEE49D1E65279BCECC82DF = { isa = PBXBuildFile; fileRef = 6F4422DA4486B5B964130284; };
+62DD540DEA5B0C7768609F29 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListeningCalendar.swift; sourceTree = "<group>"; };
+100894414BCC8CEC3C845B25 = { isa = PBXBuildFile; fileRef = 62DD540DEA5B0C7768609F29; };
+398E6E5E653718E1BD4369EE = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListeningFootprintView.swift; sourceTree = "<group>"; };
+9F08E26687749CA0E708E2BD = { isa = PBXBuildFile; fileRef = 398E6E5E653718E1BD4369EE; };
 FC82EB14533210E234B832BD = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LittleEarsApp.swift; sourceTree = "<group>"; };
 D37570B36A09DAEE05DD14D0 = { isa = PBXBuildFile; fileRef = FC82EB14533210E234B832BD; };
 8BF4A28E43F6CF370D3EE1C2 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
@@ -18,14 +24,18 @@ FC30632AEA9DE8946AF4AC9A = { isa = PBXFileReference; lastKnownFileType = sourcec
 5B44A12E57BF02934D2A5088 = { isa = PBXBuildFile; fileRef = FC30632AEA9DE8946AF4AC9A; };
 B64F0C6B0BB6506E71115544 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewRenderer.swift; sourceTree = "<group>"; };
 34892CB13D33A5830C855BF6 = { isa = PBXBuildFile; fileRef = B64F0C6B0BB6506E71115544; };
+5D3096F9B6E6760E6CA2A23C = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepTimerManager.swift; sourceTree = "<group>"; };
+3D7EDE7D287192459931C287 = { isa = PBXBuildFile; fileRef = 5D3096F9B6E6760E6CA2A23C; };
 3C579DB2717EDBDF5C1F74FB = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Spectrum.swift; sourceTree = "<group>"; };
 6A55C9EDF5CF48F1264D35AA = { isa = PBXBuildFile; fileRef = 3C579DB2717EDBDF5C1F74FB; };
 09F61F0FC73D14B7A5181A70 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 A04FAA10422B27AC5681DB27 = { isa = PBXBuildFile; fileRef = 09F61F0FC73D14B7A5181A70; };
+1D3B1029501CC3D7D03B3952 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackStatisticsView.swift; sourceTree = "<group>"; };
+B9C7455F032BFCD2A6E90BC1 = { isa = PBXBuildFile; fileRef = 1D3B1029501CC3D7D03B3952; };
 A9BCA438417D62B8BB39B2EE = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
 4AF090DF56D724E72C1CAF6A = { isa = PBXBuildFile; fileRef = A9BCA438417D62B8BB39B2EE; };
 38A007151ABE87CC01A5B6E9 = { isa = PBXFileReference; explicitFileType = wrapper.application; path = "Little Ears.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-BCE16DD0260827ECF338C787 = { isa = PBXGroup; path = Sources/LittleEars; sourceTree = "<group>"; children = (4AE4A885EF26CC9F4DA548B8,BE6A0E19A503943BB9A38947,4F602D7E5692CBF53F83E485,6F4422DA4486B5B964130284,FC82EB14533210E234B832BD,8BF4A28E43F6CF370D3EE1C2,98BF391332CD6FA75BDEFA86,FC30632AEA9DE8946AF4AC9A,B64F0C6B0BB6506E71115544,3C579DB2717EDBDF5C1F74FB,09F61F0FC73D14B7A5181A70,A9BCA438417D62B8BB39B2EE); };
+BCE16DD0260827ECF338C787 = { isa = PBXGroup; path = Sources/LittleEars; sourceTree = "<group>"; children = (4AE4A885EF26CC9F4DA548B8,275F2A1348EC6169F5F08525,BE6A0E19A503943BB9A38947,4F602D7E5692CBF53F83E485,6F4422DA4486B5B964130284,62DD540DEA5B0C7768609F29,398E6E5E653718E1BD4369EE,FC82EB14533210E234B832BD,8BF4A28E43F6CF370D3EE1C2,98BF391332CD6FA75BDEFA86,FC30632AEA9DE8946AF4AC9A,B64F0C6B0BB6506E71115544,5D3096F9B6E6760E6CA2A23C,3C579DB2717EDBDF5C1F74FB,09F61F0FC73D14B7A5181A70,1D3B1029501CC3D7D03B3952,A9BCA438417D62B8BB39B2EE); };
 F8995BA5891B07E328C60D6B = { isa = PBXFileReference; lastKnownFileType = image.icns; path = Resources/AppIcon.icns; sourceTree = "<group>"; };
 74C2431FE30C4A47C8443B80 = { isa = PBXBuildFile; fileRef = F8995BA5891B07E328C60D6B; };
 0112DAE3F84CB4DF5179BE01 = { isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Resources/Info.plist; sourceTree = "<group>"; };
@@ -34,7 +44,7 @@ FBDC4F23F93125BBEEAE800C = { isa = PBXGroup; name = Products; sourceTree = "<gro
 582681C2EAE02B3F3D399C0C = { isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/groue/GRDB.swift.git"; requirement = { kind = exactVersion; version = 7.0.0; }; };
 E9FAD0C6CD43534327C0AF90 = { isa = XCSwiftPackageProductDependency; package = 582681C2EAE02B3F3D399C0C; productName = GRDB; };
 C2D6E87B6138A50797503505 = { isa = PBXBuildFile; productRef = E9FAD0C6CD43534327C0AF90; };
-D3C3E067FC1BBCCEAA4D9313 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (3B1BD0D3E3B196288B17828C,F52CD319F95264B3DC8EFCB2,88E897F5D7AAB4ED7BFD1B87,F9AEE49D1E65279BCECC82DF,D37570B36A09DAEE05DD14D0,487C502A5481E87001E8CC43,FB920FA72F4A6013E0D99BE9,5B44A12E57BF02934D2A5088,34892CB13D33A5830C855BF6,6A55C9EDF5CF48F1264D35AA,A04FAA10422B27AC5681DB27,4AF090DF56D724E72C1CAF6A); runOnlyForDeploymentPostprocessing = 0; };
+D3C3E067FC1BBCCEAA4D9313 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (3B1BD0D3E3B196288B17828C,322FD32B188EB96A5DE291EE,F52CD319F95264B3DC8EFCB2,88E897F5D7AAB4ED7BFD1B87,F9AEE49D1E65279BCECC82DF,100894414BCC8CEC3C845B25,9F08E26687749CA0E708E2BD,D37570B36A09DAEE05DD14D0,487C502A5481E87001E8CC43,FB920FA72F4A6013E0D99BE9,5B44A12E57BF02934D2A5088,34892CB13D33A5830C855BF6,3D7EDE7D287192459931C287,6A55C9EDF5CF48F1264D35AA,A04FAA10422B27AC5681DB27,B9C7455F032BFCD2A6E90BC1,4AF090DF56D724E72C1CAF6A); runOnlyForDeploymentPostprocessing = 0; };
 BEE832DE65DB5CA7507F7EF9 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (C2D6E87B6138A50797503505); runOnlyForDeploymentPostprocessing = 0; };
 ECE2D868E17AEF81A05610A3 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (74C2431FE30C4A47C8443B80); runOnlyForDeploymentPostprocessing = 0; };
 89E1FD6268CC0F221A2BE178 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { MACOSX_DEPLOYMENT_TARGET = 14.0; SDKROOT = macosx; SWIFT_VERSION = 5.0; }; };

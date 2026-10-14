@@ -451,16 +451,17 @@ final class CoreTests: XCTestCase {
     func testArrowShortcutsRespectNativeFocusAndRepeatPolicy() throws {
         for (key, expected) in [(UInt16(123), PlaybackKeyboardShortcuts.Command.previous), (124, .next), (125, .volumeDown), (126, .volumeUp)] {
             let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: key))
-            XCTAssertEqual(PlaybackKeyboardShortcuts.command(for: event, responder: NSView(), hasSheet: false), expected)
-            for control: NSView in [NSSlider(), NSTextView(), NSTextField(), NSPopUpButton()] {
-                XCTAssertNil(PlaybackKeyboardShortcuts.command(for: event, responder: control, hasSheet: false))
+            XCTAssertEqual(PlaybackKeyboardShortcuts.command(for: event, responder: NSView(), hasSheet: false, playingPage: true), expected)
+            for control: NSView in [NSTableView(), NSOutlineView(), NSCollectionView(), NSSlider(), NSTextView(), NSTextField(), NSPopUpButton()] {
+                XCTAssertNil(PlaybackKeyboardShortcuts.command(for: event, responder: control, hasSheet: false, playingPage: true))
                 let child = NSView(); control.addSubview(child)
-                XCTAssertNil(PlaybackKeyboardShortcuts.command(for: event, responder: child, hasSheet: false))
+                XCTAssertNil(PlaybackKeyboardShortcuts.command(for: event, responder: child, hasSheet: false, playingPage: true))
             }
-            for control: NSView in [NSTableView(), NSOutlineView(), NSCollectionView(), NSButton()] {
-                XCTAssertEqual(PlaybackKeyboardShortcuts.command(for: event, responder: control, hasSheet: false), expected)
+            XCTAssertNil(PlaybackKeyboardShortcuts.command(for: event, responder: NSView(), hasSheet: false, playingPage: false))
+            for control: NSView in [NSButton()] {
+                XCTAssertEqual(PlaybackKeyboardShortcuts.command(for: event, responder: control, hasSheet: false, playingPage: true), expected)
             }
-            XCTAssertNil(PlaybackKeyboardShortcuts.command(for: event, responder: nil, hasSheet: true))
+            XCTAssertNil(PlaybackKeyboardShortcuts.command(for: event, responder: nil, hasSheet: true, playingPage: true))
         }
         XCTAssertTrue(PlaybackKeyboardShortcuts.Command.volumeUp.allowsRepeat)
         XCTAssertTrue(PlaybackKeyboardShortcuts.Command.volumeDown.allowsRepeat)

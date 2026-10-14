@@ -7,6 +7,9 @@ struct SpectrumFrame: Sendable {
     var levels: [Float]
     var peaks: [Float]
     var sampleRate: Double
+    var revision = 0
+    var epoch = 0
+    var isReset = false
     static let empty = SpectrumFrame(levels: Array(repeating: 0, count: 64), peaks: Array(repeating: 0, count: 64), sampleRate: 44100)
 }
 @MainActor
@@ -80,11 +83,12 @@ final class SpectrumAnalyzer: @unchecked Sendable {
     private var sampleRate = 44100.0
     private var active = false
     private var revision = 0
+    private var epoch = 0
     private var callback: (@Sendable (SpectrumFrame) -> Void)?
     private let queue = DispatchQueue(label: "LittleEars.Spectrum", qos: .utility)
     private let timer: DispatchSourceTimer
     private let processor = SpectrumProcessor()
-    private var processorRevision = -1
+    private var processorEpoch = -1
     private var samples = [Float](repeating: 0, count: SpectrumProcessor.size)
     init() {
         ring.initialize(repeating: 0, count: capacity)
@@ -101,16 +105,20 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         lock.unlock()
     }
     func reset() {
-        lock.lock(); written = 0; writeIndex = 0; revision += 1
+        lock.lock(); written = 0; writeIndex = 0; revision += 1; epoch += 1
+        var frame = SpectrumFrame.empty; frame.revision = revision; frame.epoch = epoch; frame.isReset = true
         let callback = callback; lock.unlock()
-        callback?(.empty)
+        callback?(frame)
+    }
+    func isCurrent(_ frame: SpectrumFrame) -> Bool {
+        lock.lock(); defer { lock.unlock() }; return frame.epoch == epoch && (frame.isReset || frame.revision == revision)
     }
     func capture(_ buffer: AVAudioPCMBuffer) {
         guard let channels = buffer.floatChannelData, !buffer.format.isInterleaved, buffer.frameLength > 0, lock.try() else { return }
         defer { lock.unlock() }
         guard active else { return }
         let rate = buffer.format.sampleRate
-        if sampleRate != rate { written = 0; writeIndex = 0; revision += 1; sampleRate = rate }
+        if sampleRate != rate { written = 0; writeIndex = 0; revision += 1; epoch += 1; sampleRate = rate }
         let count = min(Int(buffer.frameLength), capacity)
         let sourceOffset = Int(buffer.frameLength) - count
         if buffer.format.channelCount == 1 {
@@ -138,7 +146,7 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         queue.async { [weak self] in self?.renderPreview(url: url, position: position, token: token) }
     }
     private func renderPreview(url: URL, position: Double, token: Int) {
-        lock.lock(); let allowed = !active && revision == token; lock.unlock()
+        lock.lock(); let allowed = !active && revision == token; let capturedEpoch = epoch; lock.unlock()
         guard allowed else { return }
         do {
             let file = try AVAudioFile(forReading: url)
@@ -146,20 +154,19 @@ final class SpectrumAnalyzer: @unchecked Sendable {
                   let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(SpectrumProcessor.size)) else { return }
             let frame = AVAudioFramePosition(max(0, position) * file.processingFormat.sampleRate)
             file.framePosition = min(max(0, file.length - Int64(SpectrumProcessor.size)), frame)
-            processor.reset(); processorRevision = token
-            var result = SpectrumFrame.empty
-            for _ in 0..<12 {
-                try file.read(into: buffer, frameCount: AVAudioFrameCount(SpectrumProcessor.size))
-                guard buffer.frameLength > 0, let channels = buffer.floatChannelData else { break }
-                samples.withUnsafeMutableBufferPointer { pointer in
-                    vDSP_vclr(pointer.baseAddress!, 1, vDSP_Length(SpectrumProcessor.size))
-                    let count = Int(buffer.frameLength)
-                    if buffer.format.channelCount == 1 { pointer.baseAddress!.update(from: channels[0], count: count) }
-                    else { for index in 0..<count { pointer[index] = (channels[0][index] + channels[1][index]) * 0.5 } }
-                }
-                result = processor.process(samples, sampleRate: file.processingFormat.sampleRate)
-                if buffer.frameLength < SpectrumProcessor.size { break }
+            try file.read(into: buffer, frameCount: AVAudioFrameCount(SpectrumProcessor.size))
+            guard buffer.frameLength > 0, let channels = buffer.floatChannelData else { return }
+            samples.withUnsafeMutableBufferPointer { pointer in
+                vDSP_vclr(pointer.baseAddress!, 1, vDSP_Length(SpectrumProcessor.size))
+                let count = Int(buffer.frameLength)
+                if buffer.format.channelCount == 1 { pointer.baseAddress!.update(from: channels[0], count: count) }
+                else { for index in 0..<count { pointer[index] = (channels[0][index] + channels[1][index]) * 0.5 } }
             }
+            processor.reset(); processorEpoch = capturedEpoch
+            var result = SpectrumFrame.empty
+            // Settle this exact PCM window rather than reading a second ahead of the playhead.
+            for _ in 0..<12 { result = processor.process(samples, sampleRate: file.processingFormat.sampleRate) }
+            result.revision = token; result.epoch = capturedEpoch
             lock.lock(); let valid = !active && revision == token; let callback = callback; lock.unlock()
             if valid { callback?(result) }
         } catch { /* Unavailable files are handled by playback; viewing a page must not start an alert loop. */ }
@@ -168,6 +175,7 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         lock.lock()
         guard active, written >= SpectrumProcessor.size else { lock.unlock(); return }
         let token = revision
+        let capturedEpoch = epoch
         let rate = sampleRate
         let callback = callback
         let start = (writeIndex - SpectrumProcessor.size + capacity) % capacity
@@ -179,8 +187,9 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         // Retain an overlapping window but require new PCM before publishing another frame.
         written = SpectrumProcessor.size - 1
         lock.unlock()
-        if processorRevision != token { processor.reset(); processorRevision = token }
-        let frame = processor.process(samples, sampleRate: rate)
+        if processorEpoch != capturedEpoch { processor.reset(); processorEpoch = capturedEpoch }
+        var frame = processor.process(samples, sampleRate: rate)
+        frame.revision = token; frame.epoch = capturedEpoch
         lock.lock(); let valid = active && revision == token; lock.unlock()
         if valid { callback?(frame) }
     }

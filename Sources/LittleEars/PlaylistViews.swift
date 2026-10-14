@@ -25,10 +25,10 @@ struct PlaylistNameSheet: View {
             HStack {
                 Spacer()
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction).disabled(saving)
-                Button(saving ? "正在保存…" : "保存", action: save).buttonStyle(InstrumentButtonStyle(prominent: true)).keyboardShortcut(.defaultAction)
+                Button(saving ? "正在保存…" : "保存", action: save).buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
                     .disabled(saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.savingPlaylists)
             }
-        }.padding(25).frame(width: 380).foregroundStyle(palette.text).background(palette.background).buttonStyle(InstrumentButtonStyle())
+        }.padding(25).frame(width: 380).foregroundStyle(palette.text).background(palette.background).buttonStyle(.bordered)
             .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
     }
     private func save() {

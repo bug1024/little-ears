@@ -32,6 +32,7 @@ LITTLE_EARS_TEST_LIBRARY=/path/to/music swift test
 swift build
 .build/debug/LittleEars --render-preview build/ui-previews
 .build/debug/LittleEars --render-preview build/ui-previews --preview-library /path/to/music
+.build/debug/LittleEars --render-preview build/motion-preview --preview-library /path/to/music --spectrum-motion
 ```
 
 预览使用实际 SwiftUI 视图和独立内存数据库。指定音乐库时，频谱取自真实 PCM 数据，测试播放列表只存在于内存。
@@ -41,3 +42,13 @@ swift build
 - [行为与设计决策](DECISIONS.md)
 - [视觉系统及验证记录](UI_DESIGN.md)
 - [导航性能与点击命中记录](PERFORMANCE.md)
+
+`--spectrum-motion` 额外生成真实播放器视图的 GIF 和逐帧 FFT 数值 JSON，覆盖开始、暂停、恢复、跳转及切歌。输出静音，分析使用音量调节前 PCM；GIF 是低帧率采样预览，不能当作实际渲染帧率的测量。
+
+## 使用真实历史生成新功能预览
+
+```sh
+.build/debug/LittleEars --render-preview build/features-previews --preview-history "$HOME/Library/Application Support/LittleEars/library.sqlite"
+```
+
+源数据库以只读方式打开，经 SQLite 在线备份复制到内存；后续初始化及预览操作只作用于副本。功能查询与测试说明见 [FEATURES.md](FEATURES.md)。

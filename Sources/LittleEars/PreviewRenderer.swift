@@ -1,6 +1,8 @@
 import SwiftUI
 import AppKit
 import AVFoundation
+import ImageIO
+import UniformTypeIdentifiers
 
 /// Developer-only offscreen snapshots of the real SwiftUI views. No sample tracks or statistics are injected.
 @MainActor
@@ -18,6 +20,10 @@ enum PreviewRenderer {
                 model.seek(20); model.setSpectrumVisible(true)
                 try? await Task.sleep(for: .milliseconds(100))
             }
+            if CommandLine.arguments.contains("--spectrum-motion"), model.currentTrack != nil {
+                try await renderSpectrumMotion(model: model, target: target)
+            }
+            model.volume = 0
             for (name, page, dark) in [("library-dark", "library", true), ("library-light", "library", false), ("playing-dark", "playing", true), ("playlists-dark", "playlists", true), ("statistics-dark", "stats", true), ("playing-light", "playing", false), ("playlists-light", "playlists", false), ("statistics-light", "stats", false), ("compact-playing-dark", "playing", true), ("compact-library-light", "library", false)] {
                 model.page = page
                 let width: CGFloat = name.hasPrefix("compact") ? 900 : 1140
@@ -34,6 +40,30 @@ enum PreviewRenderer {
                 hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
                 if let png = bitmap.representation(using: .png, properties: [:]) { try png.write(to: target.appendingPathComponent(name + ".png")) }
                 window.contentView = nil
+            }
+            model.page = "stats"
+            for dark in [true, false] {
+                try await snapshot(ContentView(persistSidebarWidth: false).environmentObject(model).environment(\.colorScheme, dark ? .dark : .light), name: dark ? "compact-statistics-dark" : "compact-statistics-light", width: 900, height: 600, dark: dark, target: target)
+            }
+            for dark in [true, false] {
+                let palette = Palette(dark: dark, accentName: "blue")
+                model.sleepTimer.start(.minutes(15))
+                try await snapshot(SleepTimerPopover(timer: model.sleepTimer, palette: palette, hasTrack: model.currentTrack != nil).environment(\.colorScheme, dark ? .dark : .light), name: dark ? "sleep-timer-dark" : "sleep-timer-light", width: 232, height: 270, dark: dark, target: target)
+                model.sleepTimer.cancel()
+                if let track = model.tracks.first {
+                    let id = model.stats.tracks.first?.trackID ?? track.id
+                    let selection = TrackDetailsTarget(id: id, track: model.tracks.first { $0.id == id })
+                    try await snapshot(TrackStatisticsView(target: selection).environmentObject(model).environment(\.colorScheme, dark ? .dark : .light), name: dark ? "track-details-dark" : "track-details-light", width: 620, height: 540, dark: dark, target: target)
+                }
+                let grid = ListeningCalendar(year: Calendar.current.component(.year, from: Date()))
+                let day = grid.days.first { $0.id == model.stats.days.last?.day } ?? grid.days.first { $0.isToday }!
+                try await snapshot(DailyListeningDetailsView(day: day).environmentObject(model).environment(\.colorScheme, dark ? .dark : .light), name: dark ? "daily-details-dark" : "daily-details-light", width: 620, height: 540, dark: dark, target: target)
+                for accent in ["mint", "lavender", "coral"] {
+                    try await snapshot(ListeningFootprintView(palette: Palette(dark: dark, accentName: accent)).environmentObject(model).environment(\.colorScheme, dark ? .dark : .light), name: "footprint-\(accent)-\(dark ? "dark" : "light")", width: 860, height: 220, dark: dark, target: target)
+                }
+                let unplayed = model.tracks.first { track in !model.stats.tracks.contains { $0.trackID == track.id } }
+                let emptyTrack = TrackDetailsTarget(id: unplayed?.id ?? "no-records", track: unplayed)
+                try await snapshot(TrackStatisticsView(target: emptyTrack).environmentObject(model).environment(\.colorScheme, dark ? .dark : .light), name: dark ? "track-empty-dark" : "track-empty-light", width: 620, height: 540, dark: dark, target: target)
             }
             try await verifySidebar(model: model, target: target)
             if model.currentTrack != nil {
@@ -102,6 +132,56 @@ enum PreviewRenderer {
         if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), let string = String(data: data, encoding: .utf8) { print(string) }
         window.contentView = nil
         await model.shutdown(); exit(0)
+    }
+
+    /// Sampled animation of the actual player / FFT views, using muted output and source PCM.
+    private static func renderSpectrumMotion(model: AppModel, target: URL) async throws {
+        model.page = "playing"; model.volume = 0; model.setSpectrumVisible(true)
+        let width = 900, height = 600, perPhase = 8
+        var measurements: [[String: Any]] = []
+        let destination = CGImageDestinationCreateWithURL(target.appendingPathComponent("spectrum-motion.gif") as CFURL, UTType.gif.identifier as CFString, 5 * perPhase, nil)!
+        CGImageDestinationSetProperties(destination, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
+        let hosting = NSHostingView(rootView: MotionScene(model: model, phase: "开始播放"))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = hosting; window.appearance = NSAppearance(named: .darkAqua)
+        hosting.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        defer { window.contentView = nil; model.pause() }
+        for phase in ["开始播放", "暂停 · 保留最后一帧", "恢复播放", "跳转播放位置", "切换下一首"] {
+            hosting.rootView = MotionScene(model: model, phase: phase)
+            switch phase {
+            case "开始播放", "恢复播放": model.playCurrent()
+            case "暂停 · 保留最后一帧": model.pause()
+            case "跳转播放位置": model.seek(35)
+            default: model.next()
+            }
+            for _ in 0..<perPhase {
+                let start = ProcessInfo.processInfo.systemUptime
+                try await Task.sleep(for: .milliseconds(125))
+                hosting.layoutSubtreeIfNeeded()
+                guard let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { continue }
+                hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+                guard let source = bitmap.cgImage,
+                      let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { continue }
+                context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
+                guard let image = context.makeImage() else { continue }
+                let delay = ProcessInfo.processInfo.systemUptime - start
+                measurements.append(["phase": phase, "seconds": model.position, "title": model.currentTrack?.title ?? "", "levels": model.spectrumDisplay.frame.levels, "delay": delay])
+                CGImageDestinationAddImage(destination, image, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: delay]] as CFDictionary)
+            }
+        }
+        guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
+        try JSONSerialization.data(withJSONObject: measurements, options: [.prettyPrinted, .sortedKeys]).write(to: target.appendingPathComponent("spectrum-motion.json"))
+    }
+    private struct MotionScene: View {
+        @ObservedObject var model: AppModel
+        let phase: String
+        var body: some View {
+            VStack(spacing: 0) {
+                Text("动态验证 · \(phase) · 输出静音").font(.system(size: 11)).padding(8)
+                NowPlayingView(palette: Palette(dark: true, accentName: "blue")).environmentObject(model)
+            }.font(.system(size: 12)).foregroundStyle(Palette(dark: true, accentName: "blue").text)
+                .background(Palette(dark: true, accentName: "blue").background).environment(\.colorScheme, .dark)
+        }
     }
 
     /// Exercises AppKit's actual divider constraints separately from visual snapshots.

@@ -17,7 +17,7 @@ final class AppModel: ObservableObject {
     @Published var selectedPlaylistID: String?
     @Published var playlistDraft: PlaylistDraft?
     @Published var savingPlaylists = false
-    @Published var queue: [QueueItem] = []
+    @Published var queue: [QueueItem] = [] { didSet { if queue.isEmpty { sleepTimer.cancelTrackEnd() } } }
     @Published var currentID: String?
     let playbackPosition = PlaybackPositionDisplay()
     var position: Double { get { playbackPosition.position } set { if newValue != playbackPosition.position { playbackPosition.position = newValue } } }
@@ -33,6 +33,9 @@ final class AppModel: ObservableObject {
     @Published var search = "" { didSet { if search != oldValue { cachedVisibleTracks = nil } } }
     @Published var includeChildren = false { didSet { if includeChildren != oldValue { cachedVisibleTracks = nil } } }
     @Published var sortByDuration = false { didSet { if sortByDuration != oldValue { cachedVisibleTracks = nil } } }
+    let sleepTimer: SleepTimerManager
+    @Published var trackDetailsTarget: TrackDetailsTarget?
+    @Published var listeningDayTarget: ListeningCalendarDay?
     let spectrumDisplay = SpectrumDisplay()
     private var spectrumRequested = false
     private var spectrumEnabled = true
@@ -83,14 +86,22 @@ final class AppModel: ObservableObject {
         return p.count > 1 && !p[1].isEmpty ? (p[1] as NSString).lastPathComponent : sources.first { $0.id == p[0] }?.name ?? "音乐库"
     }
     var snapshot: PlayerSnapshot { PlayerSnapshot(queue: queue, currentID: currentID, position: position, mode: mode.rawValue, volume: volume) }
-    init(databasePath: String? = nil, remoteControls: Bool = true) {
+    init(databasePath: String? = nil, remoteControls: Bool = true, sleepTimer: SleepTimerManager? = nil, historySnapshotPath: String? = nil) {
+        self.sleepTimer = sleepTimer ?? SleepTimerManager()
         let display = spectrumDisplay
-        engine.spectrum.setCallback { [weak display] frame in Task { @MainActor in display?.frame = frame } }
+        engine.spectrum.setCallback { [weak self, weak display] frame in
+            Task { @MainActor in
+                guard let self, self.engine.spectrum.isCurrent(frame) else { return }
+                display?.frame = frame
+            }
+        }
         engine.onEnd = { [weak self] in self?.naturalEnd() }
+        self.sleepTimer.onExpired = { [weak self] in self?.pause() }
         let playbackTimer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in Task { @MainActor in self?.tick() } }
         RunLoop.main.add(playbackTimer, forMode: .common)
         timer = playbackTimer
-        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.pause() } })
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.sleepTimer.checkDeadline(); self?.pause() } })
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.sleepTimer.checkDeadline() } })
         observers.append(NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine.configurationNotificationObject, queue: .main) { [weak self] _ in Task { @MainActor in self?.pause() } })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didHideNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.setSpectrumWindowVisible(false) } })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didUnhideNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.setSpectrumWindowVisible(true) } })
@@ -107,14 +118,14 @@ final class AppModel: ObservableObject {
             })
         }
         if remoteControls { setupRemoteControls() }
-        Task { await initialize(databasePath: databasePath) }
+        Task { await initialize(databasePath: databasePath, historySnapshotPath: historySnapshotPath) }
     }
-    private func initialize(databasePath: String?) async {
+    private func initialize(databasePath: String?, historySnapshotPath: String?) async {
         do {
             let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("LittleEars", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let databasePath = databasePath ?? directory.appendingPathComponent("library.sqlite").path
-            let db = try await Task.detached { try LibraryDatabase(path: databasePath) }.value
+            let db = try await Task.detached { try LibraryDatabase(path: databasePath, copyingHistoryFrom: historySnapshotPath) }.value
             database = db
             let library = try await db.loadLibrary(); sources = library.0; tracks = library.1
             for var source in sources {
@@ -289,7 +300,7 @@ final class AppModel: ObservableObject {
     }
     func togglePlayback() { isPlaying ? pause() : playCurrent() }
     func playCurrent() {
-        guard ready else { return }
+        guard ready, !sleepTimer.checkDeadline() else { return }
         if queue.isEmpty { if !visibleTracks.isEmpty { start(visibleTracks) }; return }
         if currentID == nil { currentID = queue.first?.id }
         guard let track = currentTrack else { return }
@@ -318,6 +329,7 @@ final class AppModel: ObservableObject {
                 try engine.play(); isPlaying = true; updateNowPlaying(); errorMessage = message + "\n已跳过并播放下一条可用音频。"; return
             } catch { continue }
         }
+        sleepTimer.cancelTrackEnd()
         errorMessage = message + "\n没有下一条可播放的音频，播放已停止。"; checkpoint(); updateNowPlaying()
     }
     func pause() { tick(); engine.pause(); isPlaying = false; checkpoint(); updateNowPlaying() }
@@ -349,15 +361,19 @@ final class AppModel: ObservableObject {
         guard let index = queue.firstIndex(where: { $0.id == currentID }) else { return }
         if index + 1 < queue.count { jump(queue[index + 1]) }
         else if mode == .all, let first = queue.first { jump(first) }
-        else { pause(); finishSession(reason: "skipped", completed: false) }
+        else { sleepTimer.cancelTrackEnd(); pause(); finishSession(reason: "skipped", completed: false) }
     }
     func cycleMode() { mode = mode == .sequential ? .all : mode == .all ? .one : .sequential; checkpoint() }
     func moveQueue(from: IndexSet, to: Int) { queue.move(fromOffsets: from, toOffset: to); checkpoint() }
     private func naturalEnd() {
+        guard isPlaying, session != nil else { return }
+        let deadlineExpired = sleepTimer.checkDeadline()
         recordTick(finalPosition: engine.duration)
         position = engine.duration; isPlaying = false
-        let completed = coverage.qualifies(duration: engine.duration, naturalEnd: true)
+        let completed = !deadlineExpired && coverage.qualifies(duration: engine.duration, naturalEnd: true)
         finishSession(reason: "naturalEnd", completed: completed)
+        let stopAtEnd = sleepTimer.consumeTrackEnd()
+        if deadlineExpired || stopAtEnd { checkpoint(); updateNowPlaying(); return }
         guard let index = queue.firstIndex(where: { $0.id == currentID }) else { return }
         if mode == .one { loadedTrackID = nil; position = 0; playCurrent() }
         else if index + 1 < queue.count { currentID = queue[index + 1].id; loadedTrackID = nil; position = 0; playCurrent() }
@@ -408,8 +424,30 @@ final class AppModel: ObservableObject {
         }
     }
     func shutdown() async {
+        sleepTimer.cancel()
         pause(); finishSession(reason: "quit", completed: false); checkpoint(); await writeTask?.value
         scopedRoots.forEach { $0.stopAccessingSecurityScopedResource() }
+    }
+    func yearlyListeningStats(year: Int) async throws -> YearlyListeningStats {
+        guard let database else { throw CocoaError(.fileReadUnknown) }
+        let grid = ListeningCalendar(year: year)
+        return try await database.yearlyListeningStats(startDay: grid.startDay, endDayExclusive: grid.endDayExclusive)
+    }
+    func dailyListeningDetails(day: String) async throws -> DailyListeningDetails {
+        guard let database else { throw CocoaError(.fileReadUnknown) }
+        return try await database.dailyListeningDetails(day: day)
+    }
+    func showTrackStatistics(_ id: String) {
+        trackDetailsTarget = TrackDetailsTarget(id: id, track: tracks.first { $0.id == id })
+    }
+    func trackStatistics(_ id: String, startDay: String?, endDay: String) async throws -> TrackStatisticsDetails {
+        tick(); checkpoint(); await writeTask?.value
+        guard let database else { throw CocoaError(.fileReadUnknown) }
+        return try await database.trackStatistics(id, startDay: startDay, endDay: endDay)
+    }
+    func trackHistory(_ id: String, startDay: String?, endDay: String, before: TrackHistoryCursor) async throws -> TrackHistoryPage {
+        guard let database else { throw CocoaError(.fileReadUnknown) }
+        return try await database.trackHistory(id, startDay: startDay, endDay: endDay, before: before)
     }
     private func setupRemoteControls() {
         let center = MPRemoteCommandCenter.shared()
@@ -425,7 +463,7 @@ final class AppModel: ObservableObject {
     }
     func setSpectrumVisible(_ visible: Bool) { spectrumRequested = visible; synchronizeSpectrum(); previewSpectrumIfNeeded() }
     func setSpectrumEnabled(_ enabled: Bool) { spectrumEnabled = enabled; synchronizeSpectrum(); previewSpectrumIfNeeded() }
-    func setSpectrumWindowVisible(_ visible: Bool) { spectrumWindowVisible = visible; synchronizeSpectrum(); previewSpectrumIfNeeded() }
+    func setSpectrumWindowVisible(_ visible: Bool) { sleepTimer.checkDeadline(); spectrumWindowVisible = visible; synchronizeSpectrum(); previewSpectrumIfNeeded() }
     private func previewSpectrumIfNeeded(force: Bool = false) {
         guard spectrumRequested, spectrumEnabled, spectrumWindowVisible, !isPlaying,
               force || !spectrumDisplay.frame.levels.contains(where: { $0 > 0 }),

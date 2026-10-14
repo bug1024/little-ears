@@ -21,7 +21,9 @@ struct LittleEarsApp: App {
     init() {
         if let index = CommandLine.arguments.firstIndex(of: "--render-preview"), CommandLine.arguments.count > index + 1 {
             let directory = CommandLine.arguments[index + 1]
-            let instance = AppModel(databasePath: ":memory:", remoteControls: false)
+            let historyIndex = CommandLine.arguments.firstIndex(of: "--preview-history")
+            let historyPath = historyIndex.flatMap { CommandLine.arguments.indices.contains($0 + 1) ? CommandLine.arguments[$0 + 1] : nil }
+            let instance = AppModel(databasePath: ":memory:", remoteControls: false, historySnapshotPath: historyPath)
             _model = StateObject(wrappedValue: instance)
             Task { @MainActor in await PreviewRenderer.render(directory: directory, model: instance) }
         } else if let index = CommandLine.arguments.firstIndex(of: "--measure-navigation"), CommandLine.arguments.count > index + 1 {
@@ -55,7 +57,7 @@ struct MainScene: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
         ContentView()
-            .background(PlaybackKeyboardShortcuts { command in
+            .background(PlaybackKeyboardShortcuts(playingPage: model.page == "playing") { command in
                 switch command {
                 case .togglePlayback: model.togglePlayback()
                 case .previous: model.previousTrack()
