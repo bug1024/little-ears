@@ -24,6 +24,11 @@ struct LittleEarsApp: App {
             let instance = AppModel(databasePath: ":memory:", remoteControls: false)
             _model = StateObject(wrappedValue: instance)
             Task { @MainActor in await PreviewRenderer.render(directory: directory, model: instance) }
+        } else if let index = CommandLine.arguments.firstIndex(of: "--measure-navigation"), CommandLine.arguments.count > index + 1 {
+            let path = CommandLine.arguments[index + 1]
+            let instance = AppModel(databasePath: ":memory:", remoteControls: false)
+            _model = StateObject(wrappedValue: instance)
+            Task { @MainActor in await PreviewRenderer.measureNavigation(libraryPath: path, model: instance) }
         } else { _model = StateObject(wrappedValue: AppModel()) }
     }
     var body: some Scene {

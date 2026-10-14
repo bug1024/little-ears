@@ -4,6 +4,10 @@ import UniformTypeIdentifiers
 struct PlaylistNameSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) private var scheme
+    @AppStorage("accent") private var accent = "blue"
+    @AppStorage("appearance") private var appearance = "system"
+    var palette: Palette { Palette(dark: scheme == .dark, accentName: accent) }
     let draft: PlaylistDraft
     @State private var name: String
     @State private var error: String?
@@ -12,7 +16,7 @@ struct PlaylistNameSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(draft.playlistID == nil ? "新建播放列表" : "重命名播放列表").font(.title3.weight(.semibold))
-            TextField("例如：每天听一遍", text: $name).textFieldStyle(.roundedBorder).onSubmit(save)
+            TextField("例如：每天听一遍", text: $name).textFieldStyle(.plain).padding(10).modifier(MaterialSurface(palette: palette, radius: 7, inset: true)).onSubmit(save)
             if draft.playlistID == nil {
                 Text(draft.trackIDs.isEmpty ? "创建后，可从音乐库多选歌曲加入。" : "按当前顺序保存 \(draft.trackIDs.count) 首音频。")
                     .font(.caption).foregroundStyle(.secondary)
@@ -21,10 +25,11 @@ struct PlaylistNameSheet: View {
             HStack {
                 Spacer()
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction).disabled(saving)
-                Button(saving ? "正在保存…" : "保存", action: save).keyboardShortcut(.defaultAction)
+                Button(saving ? "正在保存…" : "保存", action: save).buttonStyle(InstrumentButtonStyle(prominent: true)).keyboardShortcut(.defaultAction)
                     .disabled(saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.savingPlaylists)
             }
-        }.padding(25).frame(width: 380)
+        }.padding(25).frame(width: 380).foregroundStyle(palette.text).background(palette.background).buttonStyle(InstrumentButtonStyle())
+            .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
     }
     private func save() {
         guard !saving else { return }
@@ -147,7 +152,7 @@ struct PlaylistsView: View {
                                     return true
                                 }
                         }
-                    }.listStyle(.plain).scrollContentBackground(.hidden).contentMargins(.horizontal, 0, for: .scrollContent).padding(.horizontal, 12)
+                    }.listStyle(.plain).scrollContentBackground(.hidden).contentMargins(.horizontal, 0, for: .scrollContent).modifier(MaterialSurface(palette: palette, radius: 9, inset: true)).padding(.horizontal, 12).padding(.bottom, 8)
                     HStack {
                         Text("拖拽排序 · 顺序自动保存")
                         Spacer()

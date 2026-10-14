@@ -1,16 +1,17 @@
 import SwiftUI
+import AppKit
 
 struct Palette {
     let dark: Bool
     let accentName: String
-    var background: Color { Color(hex: dark ? 0x1B1D21 : 0xF4F5F7) }
-    var sidebar: Color { Color(hex: dark ? 0x202226 : 0xECEEF1) }
-    var surface: Color { Color(hex: dark ? 0x23252A : 0xFFFFFF) }
-    var elevated: Color { Color(hex: dark ? 0x2B2E34 : 0xE8EBEF) }
-    var plot: Color { Color(hex: dark ? 0x17191D : 0xFFFFFF) }
+    var background: Color { Color(hex: dark ? 0x191B1E : 0xEFF1F3) }
+    var sidebar: Color { Color(hex: dark ? 0x222529 : 0xE5E8EB) }
+    var surface: Color { Color(hex: dark ? 0x24272B : 0xFAFBFC) }
+    var elevated: Color { Color(hex: dark ? 0x33373C : 0xDFE3E7) }
+    var plot: Color { Color(hex: dark ? 0x101316 : 0xE5EBF0) }
     var text: Color { Color(hex: dark ? 0xE9ECF1 : 0x252B33) }
-    var secondary: Color { Color(hex: dark ? 0x9A9FA8 : 0x737A85) }
-    var tertiary: Color { secondary.opacity(0.68) }
+    var secondary: Color { Color(hex: dark ? 0xA6ABB3 : 0x68717D) }
+    var tertiary: Color { secondary.opacity(0.82) }
     var border: Color { (dark ? Color.white : Color.black).opacity(dark ? 0.075 : 0.08) }
     var accent: Color {
         switch accentName {
@@ -24,26 +25,98 @@ struct Palette {
 extension Color {
     init(hex: UInt32) { self.init(.sRGB, red: Double((hex >> 16) & 255) / 255, green: Double((hex >> 8) & 255) / 255, blue: Double(hex & 255) / 255, opacity: 1) }
 }
-struct QuietButtonStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+/// Shared material language: a quiet chassis, raised controls and inset displays.
+struct MaterialSurface: ViewModifier {
+    let palette: Palette
+    var radius: CGFloat = 10
+    var inset = false
+    func body(content: Content) -> some View {
+        let base = inset ? palette.plot : palette.surface
+        content.background {
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .fill(LinearGradient(colors: [base, inset ? base : palette.background], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .strokeBorder(LinearGradient(colors: [Color.white.opacity(palette.dark ? (inset ? 0.055 : 0.12) : 0.85), palette.border], startPoint: .top, endPoint: .bottom), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(palette.dark ? 0.18 : 0.06), radius: inset ? 2 : 5, x: 0, y: inset ? 1 : 3)
+                .allowsHitTesting(false)
+        }
+    }
+}
+struct InstrumentButtonStyle: ButtonStyle {
+    var prominent = false
+    var circular = false
+    var compact = false
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.frame(minWidth: 25, minHeight: 25).contentShape(RoundedRectangle(cornerRadius: 5))
-            .background(configuration.isPressed ? Color.primary.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 5))
+        InstrumentButtonBody(configuration: configuration, prominent: prominent, circular: circular, compact: compact)
+    }
+}
+private struct InstrumentButtonBody: View {
+    let configuration: ButtonStyleConfiguration
+    let prominent: Bool
+    let circular: Bool
+    let compact: Bool
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovering = false
+    var body: some View {
+        let dark = scheme == .dark
+        let top = prominent ? Color(hex: 0xFCFDFE) : Color(hex: dark ? 0x3B3F45 : 0xFFFFFF)
+        let bottom = prominent ? Color(hex: 0xD5DBE2) : Color(hex: dark ? 0x272B30 : 0xE4E8ED)
+        let radius: CGFloat = circular ? 100 : 7
+        configuration.label
+            .font(.system(size: compact ? 11 : 12, weight: .medium))
+            .padding(.horizontal, circular || compact ? 0 : 10)
+            .frame(minWidth: compact ? 25 : 28, minHeight: compact ? 25 : 28)
+            .foregroundStyle(prominent ? Color(hex: 0x242930) : Color(hex: dark ? 0xE9ECF1 : 0x303740))
+            .background {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(LinearGradient(colors: configuration.isPressed ? [bottom, bottom] : [top, bottom], startPoint: .top, endPoint: .bottom))
+                    .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Color.white.opacity(hovering && !configuration.isPressed ? 0.055 : 0)))
+                    .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(LinearGradient(colors: [Color.white.opacity(dark ? 0.22 : 0.95), Color.black.opacity(dark ? 0.28 : 0.14)], startPoint: .top, endPoint: .bottom), lineWidth: 1))
+                    .shadow(color: .black.opacity(configuration.isPressed ? 0 : dark ? 0.25 : 0.1), radius: 2, x: 0, y: 2)
+                    .allowsHitTesting(false)
+            }
+            .opacity(enabled ? 1 : 0.42)
+            .contentShape(RoundedRectangle(cornerRadius: radius))
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
-            .modifier(HoverHighlight())
+            .onHover { hovering = $0 }
     }
 }
 struct HoverHighlight: ViewModifier {
     @State private var hovering = false
     func body(content: Content) -> some View {
-        content.background(hovering ? Color.primary.opacity(0.045) : .clear, in: RoundedRectangle(cornerRadius: 5)).onHover { hovering = $0 }
+        content.background { RoundedRectangle(cornerRadius: 6).fill(hovering ? Color.primary.opacity(0.045) : .clear).allowsHitTesting(false) }.onHover { hovering = $0 }
+    }
+}
+struct SelectionSurface: ViewModifier {
+    let palette: Palette
+    let selected: Bool
+    var radius: CGFloat = 7
+    func body(content: Content) -> some View {
+        content.background {
+            if selected {
+                RoundedRectangle(cornerRadius: radius).fill(LinearGradient(colors: [palette.elevated, palette.surface], startPoint: .top, endPoint: .bottom))
+                    .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(palette.border, lineWidth: 1))
+                    .shadow(color: .black.opacity(palette.dark ? 0.15 : 0.05), radius: 2, y: 1)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 }
 struct PanelStyle: ViewModifier {
     let palette: Palette
-    func body(content: Content) -> some View {
-        content.background(palette.surface, in: RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(palette.border, lineWidth: 1))
+    func body(content: Content) -> some View { content.modifier(MaterialSurface(palette: palette)) }
+}
+struct FormatBadge: View {
+    let title: String
+    let palette: Palette
+    var body: some View {
+        Text(title).font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .foregroundStyle(palette.secondary).padding(.horizontal, 7).frame(height: 21)
+            .modifier(MaterialSurface(palette: palette, radius: 5))
     }
 }
 struct PageHeader<Actions: View>: View {
@@ -58,6 +131,7 @@ struct PageHeader<Actions: View>: View {
             Spacer(minLength: 8)
             actions()
         }.padding(.horizontal, 20).frame(height: 48)
+            .background(LinearGradient(colors: [palette.surface.opacity(0.6), palette.background.opacity(0.2)], startPoint: .top, endPoint: .bottom))
             .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
     }
 }
@@ -82,7 +156,8 @@ struct TrackTableRow: View {
                 Text(timeLabel(duration)).font(.system(size: 11)).monospacedDigit().foregroundStyle(palette.secondary).frame(width: 52, alignment: .trailing)
                 Text(format).font(.system(size: 9, weight: .medium)).foregroundStyle(palette.tertiary).frame(width: 40, alignment: .trailing)
             }.padding(.horizontal, 10).frame(height: 32)
-                .background(selected ? palette.accent.opacity(0.1) : index.isMultiple(of: 2) ? palette.surface.opacity(0.5) : .clear)
+                .background(selected ? palette.accent.opacity(0.12) : index.isMultiple(of: 2) ? palette.surface.opacity(0.35) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                .overlay(alignment: .bottom) { Rectangle().fill(palette.border.opacity(0.45)).frame(height: 0.5).padding(.horizontal, 10) }
         }.frame(height: 32).contentShape(Rectangle()).modifier(HoverHighlight())
     }
 }
@@ -99,5 +174,74 @@ struct TableColumnHeader: View {
                 Text("格式").frame(width: 40, alignment: .trailing)
             }.font(.system(size: 10, weight: .medium)).foregroundStyle(palette.secondary).padding(.horizontal, 10).frame(height: 26)
         }.frame(height: 26).overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
+    }
+}
+
+/// Keep AppKit's slider tracking, keyboard and accessibility behavior; only replace its drawing.
+struct MaterialSlider: NSViewRepresentable {
+    @Environment(\.isEnabled) private var enabled
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let palette: Palette
+    var onEditingChanged: (Bool) -> Void = { _ in }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeNSView(context: Context) -> InstrumentSlider {
+        let slider = InstrumentSlider()
+        slider.cell = InstrumentSliderCell()
+        slider.isContinuous = true
+        slider.target = context.coordinator
+        slider.action = #selector(Coordinator.changed(_:))
+        slider.editing = { context.coordinator.parent.onEditingChanged($0) }
+        return slider
+    }
+    func updateNSView(_ slider: InstrumentSlider, context: Context) {
+        context.coordinator.parent = self
+        slider.isEnabled = enabled
+        slider.minValue = range.lowerBound; slider.maxValue = range.upperBound
+        slider.doubleValue = min(range.upperBound, max(range.lowerBound, value))
+        if let cell = slider.cell as? InstrumentSliderCell { cell.palette = palette }
+        slider.needsDisplay = true
+    }
+    final class Coordinator: NSObject {
+        var parent: MaterialSlider
+        init(_ parent: MaterialSlider) { self.parent = parent }
+        @objc func changed(_ sender: InstrumentSlider) {
+            parent.value = sender.doubleValue
+            if !sender.tracking { parent.onEditingChanged(false) }
+        }
+    }
+}
+final class InstrumentSlider: NSSlider {
+    override var acceptsFirstResponder: Bool { isEnabled }
+    var editing: ((Bool) -> Void)?
+    var tracking = false
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        window?.makeFirstResponder(self)
+        tracking = true; editing?(true)
+        super.mouseDown(with: event)
+        tracking = false; editing?(false)
+    }
+}
+final class InstrumentSliderCell: NSSliderCell {
+    var palette = Palette(dark: false, accentName: "blue")
+    override func drawBar(inside rect: NSRect, flipped: Bool) {
+        let track = NSRect(x: rect.minX, y: rect.midY - 2, width: rect.width, height: 4)
+        NSColor(palette.dark ? Color.white.opacity(0.12) : Color.black.opacity(0.12)).setFill()
+        NSBezierPath(roundedRect: track, xRadius: 2, yRadius: 2).fill()
+        let fraction = maxValue > minValue ? max(0, min(1, (doubleValue - minValue) / (maxValue - minValue))) : 0
+        let filled = NSRect(x: track.minX, y: track.minY, width: track.width * fraction, height: track.height)
+        NSColor(palette.accent.opacity(isEnabled ? 0.8 : 0.3)).setFill()
+        NSBezierPath(roundedRect: filled, xRadius: 2, yRadius: 2).fill()
+    }
+    override func drawKnob(_ knobRect: NSRect) {
+        let rect = NSRect(x: knobRect.midX - 6, y: knobRect.midY - 6, width: 12, height: 12)
+        let path = NSBezierPath(ovalIn: rect)
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow(); shadow.shadowColor = .black.withAlphaComponent(0.2); shadow.shadowBlurRadius = 2; shadow.shadowOffset = NSSize(width: 0, height: -1); shadow.set()
+        NSColor.white.withAlphaComponent(isEnabled ? 1 : 0.5).setFill(); path.fill()
+        NSGraphicsContext.restoreGraphicsState()
+        NSGradient(starting: .white.withAlphaComponent(isEnabled ? 1 : 0.35), ending: NSColor(calibratedWhite: 0.83, alpha: isEnabled ? 1 : 0.35))?.draw(in: path, angle: 90)
+        NSColor.black.withAlphaComponent(0.12).setStroke(); path.lineWidth = 0.5; path.stroke()
     }
 }

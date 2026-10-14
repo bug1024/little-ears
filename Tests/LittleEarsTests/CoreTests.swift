@@ -1,9 +1,61 @@
 import XCTest
 import AVFoundation
 import GRDB
+import Combine
 @testable import LittleEars
 
 final class CoreTests: XCTestCase {
+    @MainActor
+    func testLibraryProjectionInvalidatesForFiltersSortAndTrackChanges() async throws {
+        let model = AppModel(databasePath: ":memory:", remoteControls: false)
+        for _ in 0..<50 { if model.ready { break }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(model.ready)
+        func track(_ id: String, _ path: String, _ title: String, _ duration: Double, source: String = "local") -> Track {
+            Track(id: id, sourceID: source, relativePath: path, identity: id, title: title, duration: duration, format: "WAV", fileSize: 100, available: true)
+        }
+        model.tracks = [track("ten", "a/10.wav", "Lesson 10", 10), track("two", "a/2.wav", "Lesson 2", 20), track("sub", "a/sub/1.wav", "Lesson 1", 30), track("sibling", "ab/3.wav", "Lesson 3", 40), track("other", "a/4.wav", "Foreign", 50, source: "other")]
+        model.selectedFolder = "local|a"
+        XCTAssertEqual(model.visibleTracks.map(\.id), ["two", "ten"])
+        let rebuilds = model.visibleTracksRebuildCount
+        for _ in 0..<20 { model.page = "playing"; model.page = "library"; model.selectedFolder = "local|a"; _ = model.visibleTracks }
+        XCTAssertEqual(model.visibleTracksRebuildCount, rebuilds)
+        model.includeChildren = true
+        XCTAssertEqual(model.visibleTracks.map(\.id), ["sub", "two", "ten"])
+        model.search = "LESSON 1"
+        XCTAssertEqual(model.visibleTracks.map(\.id), ["sub", "ten"])
+        model.search = ""; model.sortByDuration = true
+        XCTAssertEqual(model.visibleTracks.map(\.id), ["ten", "two", "sub"])
+        model.tracks[0].title = "Updated title"; model.tracks[0].available = false
+        XCTAssertEqual(model.visibleTracks.first?.title, "Updated title")
+        XCTAssertEqual(model.visibleTracks.first?.available, false)
+        model.selectedFolder = "local|"; model.includeChildren = false
+        XCTAssertTrue(model.visibleTracks.isEmpty)
+        model.includeChildren = true
+        XCTAssertEqual(Set(model.visibleTracks.map(\.id)), ["ten", "two", "sub", "sibling"])
+        model.selectedFolder = nil
+        XCTAssertEqual(model.visibleTracks.count, 5)
+        model.tracks.removeAll()
+        XCTAssertTrue(model.visibleTracks.isEmpty)
+        await model.shutdown()
+    }
+    @MainActor
+    func testPlaybackPositionRefreshDoesNotInvalidateLibraryOrNavigation() async throws {
+        let model = AppModel(databasePath: ":memory:", remoteControls: false)
+        for _ in 0..<50 { if model.ready { break }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(model.ready)
+        _ = model.visibleTracks
+        let rebuilds = model.visibleTracksRebuildCount
+        var appUpdates = 0; var progressUpdates = 0
+        let appSubscription = model.objectWillChange.sink { appUpdates += 1 }
+        let progressSubscription = model.playbackPosition.objectWillChange.sink { progressUpdates += 1 }
+        for second in 1...20 { model.position = Double(second); _ = model.visibleTracks }
+        XCTAssertEqual(appUpdates, 0)
+        XCTAssertEqual(progressUpdates, 20)
+        XCTAssertEqual(model.visibleTracksRebuildCount, rebuilds)
+        XCTAssertEqual(model.snapshot.position, 20)
+        appSubscription.cancel(); progressSubscription.cancel()
+        await model.shutdown()
+    }
     func testCoverageMergesReplayedContentAndRequiresNaturalEnd() {
         var coverage = Coverage()
         coverage.add(from: 0, to: 50)

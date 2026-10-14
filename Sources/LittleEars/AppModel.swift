@@ -4,9 +4,14 @@ import MediaPlayer
 import AVFoundation
 
 @MainActor
+final class PlaybackPositionDisplay: ObservableObject {
+    @Published var position: Double = 0
+}
+
+@MainActor
 final class AppModel: ObservableObject {
     @Published var sources: [LibrarySource] = []
-    @Published var tracks: [Track] = []
+    @Published var tracks: [Track] = [] { didSet { cachedVisibleTracks = nil } }
     @Published var playlists: [Playlist] = []
     @Published var playlistItems: [PlaylistItem] = []
     @Published var selectedPlaylistID: String?
@@ -14,7 +19,8 @@ final class AppModel: ObservableObject {
     @Published var savingPlaylists = false
     @Published var queue: [QueueItem] = []
     @Published var currentID: String?
-    @Published var position: Double = 0
+    let playbackPosition = PlaybackPositionDisplay()
+    var position: Double { get { playbackPosition.position } set { if newValue != playbackPosition.position { playbackPosition.position = newValue } } }
     @Published var isPlaying = false
     @Published var mode: PlayMode = .sequential
     @Published var volume: Float = 0.7 { didSet { engine.volume = volume } }
@@ -23,10 +29,10 @@ final class AppModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var stats = Stats()
     @Published var page = "library"
-    @Published var selectedFolder: String?
-    @Published var search = ""
-    @Published var includeChildren = false
-    @Published var sortByDuration = false
+    @Published var selectedFolder: String? { didSet { if selectedFolder != oldValue { cachedVisibleTracks = nil } } }
+    @Published var search = "" { didSet { if search != oldValue { cachedVisibleTracks = nil } } }
+    @Published var includeChildren = false { didSet { if includeChildren != oldValue { cachedVisibleTracks = nil } } }
+    @Published var sortByDuration = false { didSet { if sortByDuration != oldValue { cachedVisibleTracks = nil } } }
     let spectrumDisplay = SpectrumDisplay()
     private var spectrumRequested = false
     private var spectrumEnabled = true
@@ -48,21 +54,28 @@ final class AppModel: ObservableObject {
     private var loadedTrackID: String?
     var currentItem: QueueItem? { queue.first { $0.id == currentID } }
     var currentTrack: Track? { currentItem.flatMap { item in tracks.first { $0.id == item.trackID } } }
+    private var cachedVisibleTracks: [Track]?
+    private(set) var visibleTracksRebuildCount = 0
+    private(set) var visibleTracksEvaluationCount = 0
     var visibleTracks: [Track] {
-        tracks.filter { track in
-            let key = "\(track.sourceID)|\(track.folder)"
-            let folderOK: Bool
-            if let selectedFolder {
-                let parts = selectedFolder.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
-                let folder = parts.count > 1 ? parts[1] : ""
-                folderOK = track.sourceID == parts[0] && (key == selectedFolder || (includeChildren && (folder.isEmpty || track.folder.hasPrefix(folder + "/"))))
-            } else { folderOK = true }
+        visibleTracksEvaluationCount += 1
+        if let cachedVisibleTracks { return cachedVisibleTracks }
+        visibleTracksRebuildCount += 1
+        let parts = selectedFolder?.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        let sourceID = parts?.first
+        let folder = parts?.dropFirst().first ?? ""
+        let result = tracks.filter { track in
+            let folderOK = sourceID.map { id in
+                track.sourceID == id && (track.folder == folder || (includeChildren && (folder.isEmpty || track.folder.hasPrefix(folder + "/"))))
+            } ?? true
             return folderOK && (search.isEmpty || track.title.localizedCaseInsensitiveContains(search))
         }.sorted {
             if sortByDuration, $0.duration != $1.duration { return $0.duration < $1.duration }
             let order = $0.title.localizedStandardCompare($1.title)
             return order == .orderedSame ? $0.relativePath < $1.relativePath : order == .orderedAscending
         }
+        cachedVisibleTracks = result
+        return result
     }
     var folderTitle: String {
         guard let selectedFolder else { return "所有音频" }
