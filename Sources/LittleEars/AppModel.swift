@@ -27,6 +27,10 @@ final class AppModel: ObservableObject {
     @Published var search = ""
     @Published var includeChildren = false
     @Published var sortByDuration = false
+    let spectrumDisplay = SpectrumDisplay()
+    private var spectrumRequested = false
+    private var spectrumEnabled = true
+    private var spectrumWindowVisible = true
     private let engine = PlaybackEngine()
     private let scanner = FileScanner()
     private var database: LibraryDatabase?
@@ -67,12 +71,28 @@ final class AppModel: ObservableObject {
     }
     var snapshot: PlayerSnapshot { PlayerSnapshot(queue: queue, currentID: currentID, position: position, mode: mode.rawValue, volume: volume) }
     init(databasePath: String? = nil, remoteControls: Bool = true) {
+        let display = spectrumDisplay
+        engine.spectrum.setCallback { [weak display] frame in Task { @MainActor in display?.frame = frame } }
         engine.onEnd = { [weak self] in self?.naturalEnd() }
         let playbackTimer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in Task { @MainActor in self?.tick() } }
         RunLoop.main.add(playbackTimer, forMode: .common)
         timer = playbackTimer
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.pause() } })
         observers.append(NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine.configurationNotificationObject, queue: .main) { [weak self] _ in Task { @MainActor in self?.pause() } })
+        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didHideNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.setSpectrumWindowVisible(false) } })
+        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didUnhideNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.setSpectrumWindowVisible(true) } })
+        for name in [NSWindow.didMiniaturizeNotification, NSWindow.willCloseNotification] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
+                guard let window = notification.object as? NSWindow, window.title == "Little Ears" else { return }
+                Task { @MainActor in self?.setSpectrumWindowVisible(false) }
+            })
+        }
+        for name in [NSWindow.didDeminiaturizeNotification, NSWindow.didBecomeKeyNotification] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
+                guard let window = notification.object as? NSWindow, window.title == "Little Ears" else { return }
+                Task { @MainActor in self?.setSpectrumWindowVisible(true) }
+            })
+        }
         if remoteControls { setupRemoteControls() }
         Task { await initialize(databasePath: databasePath) }
     }
@@ -279,9 +299,9 @@ final class AppModel: ObservableObject {
     }
     func pause() { tick(); engine.pause(); isPlaying = false; checkpoint(); updateNowPlaying() }
     func seek(_ seconds: Double) {
-        guard loadedTrackID != nil else { position = seconds; checkpoint(); return }
+        guard loadedTrackID != nil else { position = seconds; checkpoint(); previewSpectrumIfNeeded(force: true); return }
         tick()
-        do { try engine.seek(seconds); position = engine.position; lastPosition = position; lastTick = ProcessInfo.processInfo.systemUptime; checkpoint(); updateNowPlaying() }
+        do { try engine.seek(seconds); position = engine.position; lastPosition = position; lastTick = ProcessInfo.processInfo.systemUptime; checkpoint(); updateNowPlaying(); previewSpectrumIfNeeded(force: true) }
         catch { pause(); errorMessage = error.localizedDescription }
     }
     func previous() {
@@ -367,7 +387,19 @@ final class AppModel: ObservableObject {
             Task { @MainActor in self?.seek(event.positionTime) }; return .success
         }
     }
+    func setSpectrumVisible(_ visible: Bool) { spectrumRequested = visible; synchronizeSpectrum(); previewSpectrumIfNeeded() }
+    func setSpectrumEnabled(_ enabled: Bool) { spectrumEnabled = enabled; synchronizeSpectrum(); previewSpectrumIfNeeded() }
+    func setSpectrumWindowVisible(_ visible: Bool) { spectrumWindowVisible = visible; synchronizeSpectrum(); previewSpectrumIfNeeded() }
+    private func previewSpectrumIfNeeded(force: Bool = false) {
+        guard spectrumRequested, spectrumEnabled, spectrumWindowVisible, !isPlaying,
+              force || !spectrumDisplay.frame.levels.contains(where: { $0 > 0 }),
+              let track = currentTrack, let url = fileURL(track) else { return }
+        engine.spectrum.preview(url: url, position: position)
+    }
+    private func synchronizeSpectrum() { engine.spectrum.setActive(spectrumRequested && spectrumEnabled && spectrumWindowVisible && isPlaying) }
     private func updateNowPlaying() {
+        synchronizeSpectrum()
+        previewSpectrumIfNeeded()
         guard let track = currentTrack else { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil; return }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle: track.title,
             MPMediaItemPropertyPlaybackDuration: track.duration, MPNowPlayingInfoPropertyElapsedPlaybackTime: position,

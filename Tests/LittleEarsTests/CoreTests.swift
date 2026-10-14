@@ -118,6 +118,17 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(restored.position, seconds, accuracy: 0.05)
         XCTAssertFalse(restored.isPlaying)
         XCTAssertEqual(restored.stats.completions, 2)
+        let recordedSeconds = restored.stats.days.reduce(0) { $0 + $1.seconds }
+        restored.setSpectrumVisible(true)
+        restored.seek(1)
+        for _ in 0..<20 {
+            if restored.spectrumDisplay.frame.levels.contains(where: { $0 > 0 }) { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(restored.spectrumDisplay.frame.levels.contains(where: { $0 > 0 }))
+        XCTAssertEqual(restored.position, 1)
+        XCTAssertFalse(restored.isPlaying)
+        XCTAssertEqual(restored.stats.days.reduce(0) { $0 + $1.seconds }, recordedSeconds, accuracy: 0.01)
         await restored.shutdown()
     }
     @MainActor

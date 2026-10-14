@@ -5,6 +5,7 @@ import Foundation
 final class PlaybackEngine {
     private let engine = AVAudioEngine()
     private let node = AVAudioPlayerNode()
+    let spectrum = SpectrumAnalyzer()
     private var file: AVAudioFile?
     private var offset: Double = 0
     private var generation = UUID()
@@ -17,7 +18,11 @@ final class PlaybackEngine {
         guard let render = node.lastRenderTime, let time = node.playerTime(forNodeTime: render), time.sampleRate > 0 else { return offset }
         return min(duration, max(0, offset + Double(time.sampleTime) / time.sampleRate))
     }
-    init() { engine.attach(node) }
+    init() {
+        engine.attach(node)
+        let analyzer = spectrum
+        engine.mainMixerNode.installTap(onBus: 0, bufferSize: 2048, format: nil) { buffer, _ in analyzer.capture(buffer) }
+    }
     func load(_ url: URL, position: Double = 0) throws {
         stop()
         file = try AVAudioFile(forReading: url)
@@ -51,10 +56,11 @@ final class PlaybackEngine {
     }
     func pause() { node.pause(); running = false }
     func seek(_ seconds: Double) throws {
+        spectrum.reset()
         let resume = running
         generation = UUID(); node.stop(); running = false
         schedule(at: seconds)
         if resume { try play() }
     }
-    func stop() { generation = UUID(); node.stop(); engine.stop(); running = false; file = nil; offset = 0 }
+    func stop() { spectrum.setActive(false); spectrum.reset(); generation = UUID(); node.stop(); engine.stop(); running = false; file = nil; offset = 0 }
 }

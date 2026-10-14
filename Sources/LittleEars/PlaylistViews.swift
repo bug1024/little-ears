@@ -100,32 +100,26 @@ struct PlaylistsView: View {
     var entries: [PlaylistItem] { playlist.map { model.items(in: $0.id) } ?? [] }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("YOUR OWN ORDER").font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(2).foregroundStyle(palette.secondary)
-                    Text(playlist?.name ?? "我的播放列表").font(.system(size: 29, weight: .semibold)).lineLimit(2)
-                    Text(playlist == nil ? "挑选喜欢的音频，按自己的顺序听。" : "\(entries.count) 首音频 · 拖拽排序，自动保存")
-                        .font(.system(size: 12)).foregroundStyle(palette.secondary)
-                }
-                Spacer()
-                Button { model.draftPlaylist() } label: { Label("新建列表", systemImage: "plus") }.buttonStyle(.bordered).controlSize(.large).disabled(model.savingPlaylists || !model.ready)
-            }.padding(.bottom, 26)
+            PageHeader(title: playlist?.name ?? "播放列表", detail: playlist.map { _ in "\(entries.count) 首" } ?? "", palette: palette) {
+                Button { model.draftPlaylist() } label: { Label("新建列表", systemImage: "plus") }.disabled(model.savingPlaylists || !model.ready)
+            }
             if let playlist {
-                HStack(spacing: 12) {
-                    Button { model.playPlaylist(playlist) } label: { Label("按顺序播放", systemImage: "play.fill") }.buttonStyle(.borderedProminent).disabled(entries.isEmpty)
-                    Button { model.page = "library" } label: { Label("挑选歌曲", systemImage: "plus") }.buttonStyle(.bordered)
+                HStack(spacing: 10) {
+                    Button { model.playPlaylist(playlist) } label: { Label("播放", systemImage: "play.fill") }.disabled(entries.isEmpty)
+                    Button { model.page = "library" } label: { Label("添加歌曲", systemImage: "plus") }
                     Spacer()
                     if model.savingPlaylists { ProgressView().controlSize(.small) }
                     Menu {
                         Button("重命名…") { model.playlistDraft = PlaylistDraft(playlistID: playlist.id, name: playlist.name) }
                         Button("删除播放列表…", role: .destructive) { deleting = true }
                     } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize().disabled(model.savingPlaylists)
-                }.padding(.bottom, 18)
+                }.font(.system(size: 11)).padding(.horizontal, 20).frame(height: 42)
                 if entries.isEmpty { emptyState("这个列表还没有歌曲", detail: "到音乐库中多选音频，点击「加入播放列表」。") }
                 else {
+                    TableColumnHeader(palette: palette).padding(.horizontal, 20)
                     List(selection: $selection) {
                         ForEach(Array(entries.enumerated()), id: \.element.id) { index, item in
-                            row(item, index: index).tag(item.id).listRowSeparator(.hidden).listRowBackground(Color.clear)
+                            row(item, index: index).tag(item.id).listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(Color.clear)
                                 .onTapGesture(count: 2) { model.playPlaylist(playlist, at: item.id) }
                                 .contextMenu {
                                     Button("从这里播放") { model.playPlaylist(playlist, at: item.id) }
@@ -153,12 +147,16 @@ struct PlaylistsView: View {
                                     return true
                                 }
                         }
-                    }.listStyle(.plain).scrollContentBackground(.hidden)
-                    Text("只保存歌曲引用与顺序，不修改原始音频。列表内允许重复歌曲。")
-                        .font(.system(size: 10)).foregroundStyle(palette.secondary).padding(.vertical, 12)
+                    }.listStyle(.plain).scrollContentBackground(.hidden).contentMargins(.horizontal, 0, for: .scrollContent).padding(.horizontal, 12)
+                    HStack {
+                        Text("拖拽排序 · 顺序自动保存")
+                        Spacer()
+                        Text("\(entries.count) 首音频")
+                    }.font(.system(size: 10)).foregroundStyle(palette.secondary).padding(.horizontal, 20).frame(height: 27)
+                        .overlay(alignment: .top) { Rectangle().fill(palette.border).frame(height: 1) }
                 }
-            } else { emptyState("给喜欢的音乐，排一个顺序", detail: "先创建播放列表，或者将正在播放的队列保存下来。") }
-        }.padding(.horizontal, 32).padding(.top, 32)
+            } else { emptyState("没有播放列表", detail: "新建列表，或保存当前播放队列。") }
+        }
             .onChange(of: playlist?.id) { _, _ in selection.removeAll() }
             .alert("删除「\(playlist?.name ?? "")」？", isPresented: $deleting) {
                 Button("取消", role: .cancel) {}
@@ -172,26 +170,18 @@ struct PlaylistsView: View {
             } message: { Text("只删除播放列表，原始音频、播放记录和当前队列都会保留。") }
     }
     private func emptyState(_ title: String, detail: String) -> some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 12) {
             Spacer()
-            Image(systemName: "music.note.list").font(.system(size: 48, weight: .light)).foregroundStyle(palette.accent)
-            Text(title).font(.system(size: 22, weight: .medium))
+            Image(systemName: "music.note.list").font(.system(size: 30, weight: .light)).foregroundStyle(palette.accent)
+            Text(title).font(.system(size: 17, weight: .medium))
             Text(detail).font(.system(size: 12)).foregroundStyle(palette.secondary).multilineTextAlignment(.center)
             Spacer()
         }.frame(maxWidth: .infinity)
     }
     private func row(_ item: PlaylistItem, index: Int) -> some View {
         let track = model.tracks.first { $0.id == item.trackID }
-        return HStack(spacing: 14) {
-            Image(systemName: "line.3.horizontal").font(.system(size: 10)).foregroundStyle(palette.secondary.opacity(0.6))
-            Text(String(format: "%02d", index + 1)).font(.system(size: 11, design: .monospaced)).foregroundStyle(palette.secondary).frame(width: 24)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(track?.title ?? "音频不可用").font(.system(size: 13, weight: .medium)).lineLimit(1)
-                Text(track.map { $0.available ? ($0.folder.isEmpty ? "本地音频" : $0.folder) : "文件不可用 · 历史记录保留" } ?? "音乐库记录不可用")
-                    .font(.system(size: 10)).foregroundStyle(palette.secondary).lineLimit(1)
-            }
-            Spacer()
-            Text(timeLabel(track?.duration ?? 0)).font(.system(size: 11, design: .monospaced)).foregroundStyle(palette.secondary)
-        }.padding(.vertical, 12).contentShape(Rectangle())
+        return TrackTableRow(palette: palette, index: index, title: track?.title ?? "音频不可用",
+                             origin: track.map { $0.available ? ($0.folder.isEmpty ? "本地音频" : $0.folder) : "文件不可用" } ?? "记录不可用",
+                             duration: track?.duration ?? 0, format: track?.format ?? "—", selected: selection.contains(item.id), draggable: true)
     }
 }

@@ -7,11 +7,12 @@ struct ContentView: View {
     @Environment(\.colorScheme) var scheme
     @AppStorage("appearance") var appearance = "system"
     @AppStorage("accent") var accent = "blue"
+    @AppStorage("spectrumEnabled") var spectrumEnabled = true
     @Environment(\.openSettings) var openSettings
     var palette: Palette { Palette(dark: scheme == .dark, accentName: accent) }
     var body: some View {
         HStack(spacing: 0) {
-            sidebar.frame(width: 220)
+            sidebar.frame(width: 196)
             Rectangle().fill(palette.border).frame(width: 1)
             VStack(spacing: 0) {
                 Group {
@@ -25,87 +26,81 @@ struct ContentView: View {
                 Rectangle().fill(palette.border).frame(height: 1)
                 PlayerBar(palette: palette)
             }
-        }
-        .background(palette.background).foregroundStyle(palette.text).tint(palette.accent)
-        .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
-        .frame(minWidth: 920, minHeight: 620)
-        .sheet(item: $model.playlistDraft) { draft in PlaylistNameSheet(draft: draft).environmentObject(model) }
-        .alert("Little Ears", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
-            Button("知道了", role: .cancel) { model.errorMessage = nil }
-        } message: { Text(model.errorMessage ?? "") }
+        }.background(palette.background).foregroundStyle(palette.text).tint(palette.accent)
+            .font(.system(size: 12)).controlSize(.small)
+            .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
+            .frame(minWidth: 900, minHeight: 600)
+            .onAppear { model.setSpectrumWindowVisible(true); model.setSpectrumEnabled(spectrumEnabled) }
+            .onDisappear { model.setSpectrumWindowVisible(false) }
+            .onChange(of: spectrumEnabled) { _, value in model.setSpectrumEnabled(value) }
+            .sheet(item: $model.playlistDraft) { draft in PlaylistNameSheet(draft: draft).environmentObject(model) }
+            .alert("Little Ears", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
+                Button("知道了", role: .cancel) { model.errorMessage = nil }
+            } message: { Text(model.errorMessage ?? "") }
     }
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 11) {
-                Image(systemName: "ear.badge.waveform").font(.system(size: 24, weight: .medium)).foregroundStyle(palette.accent)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Little Ears").font(.system(size: 19, weight: .semibold, design: .rounded))
-                    Text("每天一点，慢慢听见").font(.system(size: 10)).foregroundStyle(palette.secondary)
-                }
-            }.padding(.top, 26).padding(.bottom, 30).padding(.horizontal, 20)
-            VStack(spacing: 5) {
-                nav("音乐库", icon: "square.stack", page: "library")
-                nav("播放列表", icon: "music.note.list", page: "playlists")
-                nav("正在播放", icon: "play.circle", page: "playing")
-                nav("播放统计", icon: "chart.bar.xaxis", page: "stats")
-            }.padding(.horizontal, 12)
-            if !model.playlists.isEmpty {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("我的播放列表").font(.system(size: 10, weight: .semibold)).foregroundStyle(palette.secondary).padding(.horizontal, 9)
-                    ScrollView {
-                        VStack(spacing: 3) {
-                            ForEach(model.playlists) { playlist in
-                                Button { model.selectedPlaylistID = playlist.id; model.page = "playlists" } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "music.note.list").foregroundStyle(palette.accent)
-                                        Text(playlist.name).lineLimit(1); Spacer(minLength: 0)
-                                    }.font(.system(size: 12)).padding(9)
-                                        .background(model.page == "playlists" && model.selectedPlaylist?.id == playlist.id ? palette.accent.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 7))
-                                }.buttonStyle(.plain)
-                            }
-                        }
-                    }.frame(maxHeight: 130)
-                }.padding(.horizontal, 12).padding(.top, 22)
-            }
-            HStack {
-                Text("音乐目录").font(.system(size: 10, weight: .semibold)).foregroundStyle(palette.secondary)
-                Spacer()
-                Button(action: model.importFolders) { Image(systemName: "plus").font(.system(size: 12)) }.buttonStyle(.plain).help("添加音频目录").disabled(!model.ready || model.scanning)
-            }.padding(.horizontal, 21).padding(.top, 32).padding(.bottom, 12)
+            HStack(spacing: 9) {
+                Image(systemName: "ear.badge.waveform").font(.system(size: 20, weight: .regular)).foregroundStyle(palette.accent)
+                Text("Little Ears").font(.system(size: 15, weight: .semibold))
+            }.padding(.horizontal, 16).frame(height: 57)
+            VStack(spacing: 2) {
+                nav("音乐库", icon: "square.stack", page: "library", count: model.tracks.count)
+                nav("播放列表", icon: "music.note.list", page: "playlists", count: model.playlists.count)
+                nav("正在播放", icon: "play.circle", page: "playing", count: nil)
+                nav("播放统计", icon: "chart.bar.xaxis", page: "stats", count: nil)
+            }.padding(.horizontal, 9)
             ScrollView {
-                VStack(alignment: .leading, spacing: 5) {
-                    ForEach(model.sources) { source in
-                        FolderBranch(source: source, path: "", palette: palette)
+                VStack(alignment: .leading, spacing: 0) {
+                    sectionLabel("播放列表") { model.draftPlaylist() }
+                    if model.playlists.isEmpty {
+                        Text("创建列表，保存播放顺序").font(.system(size: 10)).foregroundStyle(palette.tertiary).padding(.horizontal, 8).padding(.bottom, 6)
                     }
-                    if model.sources.isEmpty {
-                        Text("添加一个文件夹，\n让故事从这里开始。").font(.system(size: 12)).foregroundStyle(palette.secondary).lineSpacing(5).padding(.horizontal, 9)
+                    ForEach(model.playlists) { playlist in
+                        Button { model.selectedPlaylistID = playlist.id; model.page = "playlists" } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "music.note.list").font(.system(size: 11)).foregroundStyle(palette.secondary)
+                                Text(playlist.name).lineLimit(1).font(.system(size: 11))
+                                Spacer(minLength: 0)
+                                Text("\(model.items(in: playlist.id).count)").font(.system(size: 10)).foregroundStyle(palette.tertiary)
+                            }.padding(.horizontal, 8).frame(height: 29)
+                                .background(model.page == "playlists" && model.selectedPlaylist?.id == playlist.id ? palette.accent.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                        }.buttonStyle(.plain).modifier(HoverHighlight())
                     }
-                }.padding(.horizontal, 12)
+                    sectionLabel("音乐目录", action: model.importFolders)
+                    ForEach(model.sources) { source in FolderBranch(source: source, path: "", palette: palette) }
+                    if model.sources.isEmpty { Text("添加本地音频文件夹").font(.system(size: 10)).foregroundStyle(palette.tertiary).padding(.horizontal, 8) }
+                }.padding(.horizontal, 9)
             }
-            Spacer(minLength: 10)
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 7) {
-                    Circle().fill(palette.accent).frame(width: 5, height: 5)
-                    Text("本地音频 · 完全离线").font(.system(size: 10)).foregroundStyle(palette.secondary)
-                }
-                Button { openSettings() } label: { Label("设置", systemImage: "gearshape").font(.system(size: 12)) }.buttonStyle(.plain)
-            }.padding(22)
-        }.background(palette.surface.opacity(0.55))
+            HStack(spacing: 6) {
+                Circle().fill(model.isPlaying ? palette.accent : palette.tertiary).frame(width: 4, height: 4)
+                Text(model.isPlaying ? "正在播放 · 本地音频" : "本地音频 · 离线音乐库").font(.system(size: 10)).foregroundStyle(palette.secondary)
+                Spacer(minLength: 0)
+                Button { openSettings() } label: { Image(systemName: "gearshape").font(.system(size: 12)) }.buttonStyle(QuietButtonStyle()).help("设置 · ⌘,")
+            }.padding(.horizontal, 12).frame(height: 38).overlay(alignment: .top) { Rectangle().fill(palette.border).frame(height: 1) }
+        }.background(palette.sidebar)
     }
-    private func nav(_ title: String, icon: String, page: String) -> some View {
+    private func sectionLabel(_ title: String, action: @escaping () -> Void) -> some View {
+        HStack {
+            Text(title).font(.system(size: 10, weight: .semibold)).foregroundStyle(palette.secondary)
+            Spacer()
+            Button(action: action) { Image(systemName: "plus").font(.system(size: 10)) }.buttonStyle(QuietButtonStyle()).disabled(!model.ready || model.scanning || model.savingPlaylists).help(title == "播放列表" ? "新建播放列表" : "添加目录")
+        }.padding(.leading, 8).padding(.top, 13).padding(.bottom, 3)
+    }
+    private func nav(_ title: String, icon: String, page: String, count: Int?) -> some View {
         Button {
             model.page = page
             if page == "library" { model.selectedFolder = nil }
         } label: {
-            HStack(spacing: 12) {
-                Image(systemName: icon).font(.system(size: 16)).frame(width: 20)
-                Text(title).font(.system(size: 13, weight: model.page == page ? .semibold : .regular))
+            HStack(spacing: 9) {
+                Image(systemName: icon).font(.system(size: 13, weight: .regular)).frame(width: 18)
+                Text(title).font(.system(size: 12, weight: model.page == page ? .medium : .regular))
                 Spacer()
-                if page == "library" { Text("\(model.tracks.count)").font(.system(size: 10, design: .monospaced)).foregroundStyle(palette.secondary) }
-            }.padding(.horizontal, 12).padding(.vertical, 11)
-                .foregroundStyle(model.page == page ? palette.accent : palette.secondary)
-                .background(model.page == page ? palette.accent.opacity(0.11) : .clear, in: RoundedRectangle(cornerRadius: 9))
-        }.buttonStyle(.plain)
+                if let count { Text("\(count)").font(.system(size: 10)).monospacedDigit().foregroundStyle(palette.secondary) }
+            }.padding(.horizontal, 9).frame(height: 31)
+                .foregroundStyle(model.page == page ? palette.text : palette.secondary)
+                .background(model.page == page ? palette.elevated : .clear, in: RoundedRectangle(cornerRadius: 6))
+        }.buttonStyle(.plain).modifier(HoverHighlight())
     }
 }
 struct FolderBranch: View {
@@ -124,27 +119,23 @@ struct FolderBranch: View {
         }).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 5) {
-                Button { expanded.toggle() } label: {
-                    Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.system(size: 8, weight: .bold)).frame(width: 10)
-                }.buttonStyle(.plain).opacity(children.isEmpty ? 0 : 1).disabled(children.isEmpty)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 3) {
+                Button { expanded.toggle() } label: { Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.system(size: 8, weight: .semibold)).frame(width: 10, height: 26) }.buttonStyle(.plain).opacity(children.isEmpty ? 0 : 1).disabled(children.isEmpty)
                 Button {
                     model.selectedFolder = "\(source.id)|\(path)"; model.page = "library"; model.search = ""
                 } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: path.isEmpty ? "folder.fill" : "folder").font(.system(size: 12)).foregroundStyle(palette.accent.opacity(0.8))
-                        Text(path.isEmpty ? source.name : (path as NSString).lastPathComponent).font(.system(size: 12)).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Image(systemName: path.isEmpty ? "folder.fill" : "folder").font(.system(size: 11)).foregroundStyle(palette.secondary)
+                        Text(path.isEmpty ? source.name : (path as NSString).lastPathComponent).font(.system(size: 11)).lineLimit(1)
                         Spacer(minLength: 0)
-                    }.padding(.vertical, 7)
+                    }.frame(height: 27)
                 }.buttonStyle(.plain)
-            }.padding(.horizontal, 6)
-                .background(model.selectedFolder == "\(source.id)|\(path)" ? palette.accent.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 7))
-                .contextMenu {
-                    Button("刷新目录") { model.refreshAll() }
-                    Button("重新授权目录…") { model.reauthorize(source) }
-                }
-            if expanded { ForEach(children, id: \.self) { child in FolderBranch(source: source, path: child, palette: palette).padding(.leading, 12) } }
+            }.padding(.horizontal, 5)
+                .background(model.selectedFolder == "\(source.id)|\(path)" && model.page == "library" ? palette.elevated : .clear, in: RoundedRectangle(cornerRadius: 5))
+                .modifier(HoverHighlight())
+                .contextMenu { Button("刷新目录") { model.refreshAll() }; Button("重新授权目录…") { model.reauthorize(source) } }
+            if expanded { ForEach(children, id: \.self) { child in FolderBranch(source: source, path: child, palette: palette).padding(.leading, 10) } }
         }
     }
 }
@@ -152,94 +143,61 @@ struct LibraryView: View {
     @EnvironmentObject var model: AppModel
     let palette: Palette
     @State private var selection = Set<String>()
+    var selectedIDs: [String] { model.visibleTracks.filter { selection.contains($0.id) }.map(\.id) }
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("YOUR LISTENING SPACE").font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(2).foregroundStyle(palette.secondary)
-                    Text(model.folderTitle).font(.system(size: 29, weight: .semibold))
-                    Text(model.scanning ? "正在读取音频信息…" : "\(model.visibleTracks.count) 段音频 · \(listeningLabel(model.visibleTracks.reduce(0) { $0 + $1.duration }))")
-                        .font(.system(size: 12)).foregroundStyle(palette.secondary)
-                }
-                Spacer()
+        VStack(spacing: 0) {
+            PageHeader(title: model.folderTitle, detail: "\(model.visibleTracks.count) 首 · \(listeningLabel(model.visibleTracks.reduce(0) { $0 + $1.duration }))", palette: palette) {
+                if model.scanning { ProgressView().controlSize(.mini) }
                 Button(action: model.importFolders) { Label("添加目录", systemImage: "folder.badge.plus") }.disabled(!model.ready || model.scanning)
-                    .buttonStyle(.bordered).controlSize(.large)
-            }.padding(.bottom, 26)
+            }
             if model.tracks.isEmpty {
-                Spacer()
-                VStack(spacing: 19) {
-                    ListeningArtwork(palette: palette, size: 148)
-                    Text("把熟悉的故事，放进每天。").font(.system(size: 23, weight: .medium))
-                    Text("选择你的英文故事、儿歌或分级阅读目录。\n音频留在原处，Little Ears 帮你接着听。")
-                        .font(.system(size: 13)).foregroundStyle(palette.secondary).multilineTextAlignment(.center).lineSpacing(6)
-                    Button(action: model.importFolders) { Label("选择音频文件夹", systemImage: "plus").padding(.horizontal, 10).padding(.vertical, 5) }
-                        .buttonStyle(.borderedProminent).disabled(!model.ready || model.scanning)
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "folder.badge.plus").font(.system(size: 32, weight: .light)).foregroundStyle(palette.secondary)
+                    Text("添加你的音乐目录").font(.system(size: 17, weight: .medium))
+                    Text("音频保留在原处，支持 MP3、M4A、WAV、AIFF、CAF 和 FLAC。")
+                        .font(.system(size: 11)).foregroundStyle(palette.secondary)
+                    Button("选择文件夹…", action: model.importFolders).buttonStyle(.borderedProminent).disabled(!model.ready || model.scanning)
+                    Spacer()
                 }.frame(maxWidth: .infinity)
-                Spacer()
-                Text("支持 MP3、M4A、WAV、AIFF、CAF 与 FLAC").font(.system(size: 10)).foregroundStyle(palette.secondary).frame(maxWidth: .infinity).padding(.bottom, 26)
             } else {
-                HStack(spacing: 12) {
-                    Button { model.start(model.visibleTracks) } label: { Label("播放全部", systemImage: "play.fill") }.buttonStyle(.borderedProminent).disabled(model.visibleTracks.isEmpty)
-                    Button(action: model.refreshAll) { Image(systemName: "arrow.clockwise") }.buttonStyle(.bordered).help("刷新音乐库").disabled(model.scanning)
-                    AddToPlaylistMenu(trackIDs: model.visibleTracks.filter { selection.contains($0.id) }.map(\.id))
-                        .menuStyle(.borderlessButton).fixedSize().font(.system(size: 11))
-                    if model.selectedFolder != nil { Toggle("包含子目录", isOn: $model.includeChildren).toggleStyle(.checkbox).font(.system(size: 11)) }
-                    Spacer()
-                }.padding(.bottom, 12)
-                HStack {
-                    Text(selection.isEmpty ? "按 ⌘ 或 Shift 多选歌曲" : "已选择 \(model.visibleTracks.filter { selection.contains($0.id) }.count) 首")
-                        .font(.system(size: 10)).foregroundStyle(palette.secondary)
-                    Spacer()
-                    Picker("排序", selection: $model.sortByDuration) { Text("名称").tag(false); Text("时长").tag(true) }.labelsHidden().frame(width: 90)
-                    HStack(spacing: 7) { Image(systemName: "magnifyingglass").foregroundStyle(palette.secondary); TextField("搜索音频", text: $model.search).textFieldStyle(.plain) }
-                        .font(.system(size: 12)).padding(9).frame(width: 190).background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
-                }.padding(.bottom, 19)
-                HStack {
-                    Text("音频"); Spacer(); Text("时长").frame(width: 65); Text("格式").frame(width: 55)
-                }.font(.system(size: 10)).foregroundStyle(palette.secondary).padding(.horizontal, 14).padding(.bottom, 10)
-                Rectangle().fill(palette.border).frame(height: 1)
+                HStack(spacing: 10) {
+                    Button { model.start(model.visibleTracks) } label: { Label("播放", systemImage: "play.fill") }.disabled(model.visibleTracks.isEmpty)
+                    AddToPlaylistMenu(trackIDs: selectedIDs).menuStyle(.borderlessButton).fixedSize()
+                    Button(action: model.refreshAll) { Image(systemName: "arrow.clockwise") }.buttonStyle(QuietButtonStyle()).help("刷新音乐库").disabled(model.scanning)
+                    if model.selectedFolder != nil { Toggle("子目录", isOn: $model.includeChildren).toggleStyle(.checkbox).font(.system(size: 11)) }
+                    Spacer(minLength: 6)
+                    Picker("排序", selection: $model.sortByDuration) { Text("名称").tag(false); Text("时长").tag(true) }.labelsHidden().frame(width: 77)
+                    HStack(spacing: 5) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(palette.secondary)
+                        TextField("搜索音频", text: $model.search).textFieldStyle(.plain)
+                        if !model.search.isEmpty { Button { model.search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(palette.tertiary) }.buttonStyle(.plain).help("清除搜索") }
+                    }.padding(.horizontal, 8).frame(width: 152, height: 25).background(palette.surface, in: RoundedRectangle(cornerRadius: 5)).overlay(RoundedRectangle(cornerRadius: 5).stroke(palette.border, lineWidth: 1))
+                }.font(.system(size: 11)).padding(.horizontal, 20).frame(height: 42)
+                TableColumnHeader(palette: palette).padding(.horizontal, 20)
                 List(selection: $selection) {
-                    ForEach(model.visibleTracks) { track in
-                        trackRow(track).tag(track.id).listRowSeparator(.hidden).listRowBackground(Color.clear)
+                    ForEach(Array(model.visibleTracks.enumerated()), id: \.element.id) { index, track in
+                        TrackTableRow(palette: palette, index: index, title: track.title,
+                                      origin: track.available ? (track.folder.isEmpty ? model.sources.first { $0.id == track.sourceID }?.name ?? "" : track.folder) : "文件不可用",
+                                      duration: track.duration, format: track.format, current: model.currentTrack?.id == track.id, selected: selection.contains(track.id))
+                            .tag(track.id).listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(Color.clear)
                             .onTapGesture(count: 2) { model.start(model.visibleTracks, at: track) }
                             .contextMenu {
                                 Button("播放") { model.start(model.visibleTracks, at: track) }
-                                Button("播放所选音频") { model.start(model.visibleTracks.filter { selection.contains($0.id) }) }.disabled(selection.isEmpty)
-                                AddToPlaylistMenu(trackIDs: selection.contains(track.id) ? model.visibleTracks.filter { selection.contains($0.id) }.map(\.id) : [track.id])
+                                Button("播放所选音频") { model.start(model.visibleTracks.filter { selection.contains($0.id) }) }.disabled(selectedIDs.isEmpty)
+                                AddToPlaylistMenu(trackIDs: selection.contains(track.id) ? selectedIDs : [track.id])
                                 Button("在 Finder 中显示") { model.reveal(track) }
                             }
                     }
-                }.listStyle(.plain).scrollContentBackground(.hidden)
-                if model.visibleTracks.isEmpty { Text("没有匹配的音频。试试其他目录或搜索词。").font(.system(size: 12)).foregroundStyle(palette.secondary).padding(20) }
+                }.listStyle(.plain).scrollContentBackground(.hidden).contentMargins(.horizontal, 0, for: .scrollContent).padding(.horizontal, 12)
+                HStack {
+                    Text(selectedIDs.isEmpty ? "⌘ / Shift 多选" : "已选择 \(selectedIDs.count) 首")
+                    Spacer()
+                    Text(model.scanning ? "正在扫描…" : "\(model.sources.count) 个音乐目录")
+                }.font(.system(size: 10)).foregroundStyle(palette.secondary).padding(.horizontal, 20).frame(height: 27)
+                    .overlay(alignment: .top) { Rectangle().fill(palette.border).frame(height: 1) }
             }
-        }.padding(.horizontal, 32).padding(.top, 32)
-    }
-    private func trackRow(_ track: Track) -> some View {
-        HStack(spacing: 13) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8).fill(palette.elevated).frame(width: 38, height: 38)
-                Image(systemName: model.currentTrack?.id == track.id ? "speaker.wave.2.fill" : "music.note").font(.system(size: 14)).foregroundStyle(model.currentTrack?.id == track.id ? palette.accent : palette.secondary)
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(track.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                Text(track.available ? (track.folder.isEmpty ? model.sources.first { $0.id == track.sourceID }?.name ?? "" : track.folder) : "文件不可用 · 刷新目录以重新检查")
-                    .font(.system(size: 10)).foregroundStyle(palette.secondary).lineLimit(1)
-            }
-            Spacer()
-            Text(timeLabel(track.duration)).monospacedDigit().frame(width: 65)
-            Text(track.format).font(.system(size: 9, design: .monospaced)).frame(width: 55)
-        }.foregroundStyle(palette.text).padding(.vertical, 7)
-    }
-}
-struct ListeningArtwork: View {
-    let palette: Palette
-    let size: CGFloat
-    var body: some View {
-        ZStack {
-            Circle().fill(LinearGradient(colors: [palette.accent.opacity(0.12), palette.surface], startPoint: .topLeading, endPoint: .bottomTrailing))
-            ForEach(0..<4) { i in Circle().stroke(palette.accent.opacity(0.08 + Double(i) * 0.025), lineWidth: 1).padding(CGFloat(i) * size * 0.09 + 9) }
-            Image(systemName: "ear.badge.waveform").font(.system(size: size * 0.28, weight: .ultraLight)).foregroundStyle(palette.accent)
-        }.frame(width: size, height: size).accessibilityHidden(true)
+        }
     }
 }
 struct PlayerBar: View {
@@ -248,90 +206,203 @@ struct PlayerBar: View {
     @State private var dragging = false
     @State private var scrub: Double = 0
     var body: some View {
-        VStack(spacing: 13) {
-            HStack(spacing: 20) {
-                HStack(spacing: 11) {
-                    Image(systemName: "music.note").font(.system(size: 20)).foregroundStyle(palette.accent).frame(width: 42, height: 42).background(palette.elevated, in: RoundedRectangle(cornerRadius: 10))
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(model.currentTrack?.title ?? "还没有开始播放").font(.system(size: 12, weight: .medium)).lineLimit(1)
-                        Text(model.currentTrack.map { $0.folder.isEmpty ? "本地音频" : ($0.folder as NSString).lastPathComponent } ?? "选一段故事，开始今天的熏听")
-                            .font(.system(size: 10)).foregroundStyle(palette.secondary).lineLimit(1)
+        GeometryReader { proxy in
+            HStack(spacing: 15) {
+                Button { model.page = "playing" } label: {
+                    HStack(spacing: 9) {
+                        Image(systemName: "music.note").font(.system(size: 14)).foregroundStyle(palette.secondary).frame(width: 30, height: 30).background(palette.elevated, in: RoundedRectangle(cornerRadius: 5))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(model.currentTrack?.title ?? "未选择音频").font(.system(size: 12, weight: .medium)).lineLimit(1)
+                            Text(model.currentTrack.map { $0.folder.isEmpty ? "本地音频" : ($0.folder as NSString).lastPathComponent } ?? "从音乐库开始播放")
+                                .font(.system(size: 10)).foregroundStyle(palette.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
                     }
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 13) {
-                    Button(action: model.previous) { Image(systemName: "backward.end.fill") }.help("上一首 · ⌘←")
+                }.buttonStyle(.plain).frame(width: max(164, min(236, proxy.size.width * 0.25))).help("显示正在播放")
+                HStack(spacing: 4) {
+                    Button(action: model.previous) { Image(systemName: "backward.end.fill").font(.system(size: 12)) }.help("上一首 · ⌘←")
                     Button(action: model.togglePlayback) {
-                        Image(systemName: model.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 17, weight: .semibold)).offset(x: model.isPlaying ? 0 : 1)
-                            .foregroundStyle(palette.background).frame(width: 44, height: 44).background(palette.accent, in: Circle())
-                    }.buttonStyle(.plain).help("播放／暂停 · ⌘P").accessibilityLabel(model.isPlaying ? "暂停" : "播放")
-                    Button(action: model.next) { Image(systemName: "forward.end.fill") }.help("下一首 · ⌘→")
+                        Image(systemName: model.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 13, weight: .semibold)).offset(x: model.isPlaying ? 0 : 1)
+                            .frame(width: 29, height: 29).background(palette.elevated, in: Circle())
+                    }.help("播放／暂停 · ⌘P").accessibilityLabel(model.isPlaying ? "暂停" : "播放")
+                    Button(action: model.next) { Image(systemName: "forward.end.fill").font(.system(size: 12)) }.help("下一首 · ⌘→")
                 }.buttonStyle(QuietButtonStyle()).disabled(!model.ready)
-                HStack(spacing: 8) {
-                    Button(action: model.cycleMode) { Image(systemName: model.mode.symbol).foregroundStyle(model.mode == .sequential ? palette.secondary : palette.accent) }.help(model.mode.title).buttonStyle(QuietButtonStyle())
-                    Image(systemName: model.volume == 0 ? "speaker.slash" : "speaker.wave.2").font(.system(size: 11)).foregroundStyle(palette.secondary)
-                    Slider(value: $model.volume, in: 0...1).frame(width: 80).controlSize(.small).accessibilityLabel("音量")
-                }.frame(maxWidth: .infinity, alignment: .trailing)
+                VStack(spacing: 0) {
+                    Slider(value: Binding(get: { dragging ? scrub : min(model.position, max(1, model.currentTrack?.duration ?? 1)) }, set: { scrub = $0 }), in: 0...max(1, model.currentTrack?.duration ?? 1)) { editing in
+                        dragging = editing
+                        if editing { scrub = model.position } else { model.seek(scrub) }
+                    }.controlSize(.mini).disabled(model.currentTrack == nil).accessibilityLabel("播放进度")
+                    HStack {
+                        Text(timeLabel(dragging ? scrub : model.position)); Spacer(); Text(timeLabel(model.currentTrack?.duration ?? 0))
+                    }.font(.system(size: 9)).monospacedDigit().foregroundStyle(palette.secondary)
+                }.frame(maxWidth: .infinity)
+                HStack(spacing: 5) {
+                    Button(action: model.cycleMode) { Image(systemName: model.mode.symbol).font(.system(size: 12)).foregroundStyle(model.mode == .sequential ? palette.secondary : palette.accent) }.buttonStyle(QuietButtonStyle()).help(model.mode.title)
+                    Image(systemName: model.volume == 0 ? "speaker.slash" : "speaker.wave.2").font(.system(size: 10)).foregroundStyle(palette.secondary)
+                    Slider(value: $model.volume, in: 0...1).controlSize(.mini).frame(width: 60).accessibilityLabel("音量")
+                }
+            }.padding(.horizontal, 16).frame(height: 68)
+        }.frame(height: 68).background(palette.surface)
+    }
+}
+struct SpectrumPlot: View {
+    @ObservedObject var display: SpectrumDisplay
+    let palette: Palette
+    let playing: Bool
+    var body: some View {
+        VStack(spacing: 7) {
+            Canvas { context, size in
+                let left: CGFloat = 27
+                let plotWidth = max(1, size.width - left - 6)
+                let plotHeight = max(1, size.height - 5)
+                for step in 0...4 {
+                    let y = CGFloat(step) / 4 * plotHeight
+                    var line = Path(); line.move(to: CGPoint(x: left, y: y)); line.addLine(to: CGPoint(x: size.width, y: y))
+                    context.stroke(line, with: .color(palette.border), lineWidth: 0.5)
+                    context.draw(Text("\(-step * 20)").font(.system(size: 8)).foregroundColor(palette.tertiary), at: CGPoint(x: 9, y: max(5, y)), anchor: .center)
+                }
+                let width = plotWidth / CGFloat(display.frame.levels.count)
+                for (index, level) in display.frame.levels.enumerated() {
+                    let height = max(2, CGFloat(level) * plotHeight)
+                    let x = left + CGFloat(index) * width
+                    let rect = CGRect(x: x + 1, y: plotHeight - height, width: max(1, width - 2), height: height)
+                    let shape = Path(roundedRect: rect, cornerRadius: 1.2)
+                    context.fill(shape, with: .linearGradient(Gradient(colors: [palette.accent.opacity(playing ? 0.86 : 0.52), palette.accent.opacity(playing ? 0.42 : 0.25)]), startPoint: CGPoint(x: 0, y: 0), endPoint: CGPoint(x: 0, y: plotHeight)))
+                    let peak = CGFloat(display.frame.peaks[index]) * plotHeight
+                    if peak > 4 {
+                        let cap = Path(CGRect(x: x + 1, y: plotHeight - peak - 2, width: max(1, width - 2), height: 1))
+                        context.fill(cap, with: .color(palette.accent.opacity(0.45)))
+                    }
+                }
+            }.accessibilityLabel("实时音频频谱").accessibilityValue(playing ? "正在显示播放音频的频谱" : "已暂停")
+            frequencyAxis.frame(height: 12)
+        }
+    }
+    private var frequencyAxis: some View {
+        GeometryReader { geometry in
+            let upper: Double = min(16000.0, display.frame.sampleRate / 2.0)
+            let ticks: [Double] = Array(Set([30.0, 100.0, 1000.0, 4000.0, upper].filter { $0 <= upper })).sorted()
+            ZStack(alignment: .topLeading) {
+                ForEach(ticks, id: \.self) { frequency in
+                    let label: String = frequency >= 1000.0 ? "\(Int(frequency / 1000.0))k" : "\(Int(frequency)) Hz"
+                    let fraction: CGFloat = CGFloat(log(frequency / 30.0) / log(upper / 30.0))
+                    let x: CGFloat = min(geometry.size.width - 12.0, 27.0 + fraction * (geometry.size.width - 33.0))
+                    Text(label).font(.system(size: 9)).foregroundStyle(palette.tertiary).position(x: x, y: 6)
+                }
             }
-            HStack(spacing: 10) {
-                Text(timeLabel(dragging ? scrub : model.position)).frame(width: 44, alignment: .trailing)
-                Slider(value: Binding(get: { dragging ? scrub : min(model.position, max(1, model.currentTrack?.duration ?? 1)) }, set: { scrub = $0 }), in: 0...max(1, model.currentTrack?.duration ?? 1)) { editing in
-                    dragging = editing
-                    if editing { scrub = model.position } else { model.seek(scrub) }
-                }.controlSize(.small).disabled(model.currentTrack == nil).accessibilityLabel("播放进度")
-                Text(timeLabel(model.currentTrack?.duration ?? 0)).frame(width: 44, alignment: .leading)
-            }.font(.system(size: 10, design: .monospaced)).foregroundStyle(palette.secondary)
-        }.padding(.horizontal, 24).padding(.vertical, 17).background(palette.surface)
+        }
     }
 }
 struct NowPlayingView: View {
     @EnvironmentObject var model: AppModel
+    @AppStorage("spectrumEnabled") var spectrumEnabled = true
     let palette: Palette
     @State private var draggedID: String?
+    var currentIndex: Int? { model.queue.firstIndex { $0.id == model.currentID } }
+    var nextItems: [QueueItem] { currentIndex.map { Array(model.queue.dropFirst($0 + 1).prefix(2)) } ?? [] }
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                HStack { Text("NOW PLAYING").font(.system(size: 9, design: .monospaced)).tracking(2); Spacer(); Text(model.isPlaying ? "正在播放" : "已暂停").font(.system(size: 11)) }
-                    .foregroundStyle(palette.secondary)
-                Spacer()
-                ListeningArtwork(palette: palette, size: 230)
-                Text(model.currentTrack?.title ?? "故事即将开始").font(.system(size: 27, weight: .medium)).multilineTextAlignment(.center).lineLimit(3).padding(.top, 30)
-                Text(model.currentTrack.map { $0.folder.isEmpty ? "本地音频" : $0.folder } ?? "从音乐库选择你想听的音频")
-                    .font(.system(size: 12)).foregroundStyle(palette.secondary).padding(.top, 10)
-                Spacer()
-                Text(model.mode.title).font(.system(size: 11)).foregroundStyle(palette.accent).padding(.bottom, 12)
-            }.padding(32).frame(maxWidth: .infinity)
-            Rectangle().fill(palette.border).frame(width: 1)
-            VStack(alignment: .leading, spacing: 18) {
-                HStack { Text("接下来听").font(.system(size: 17, weight: .semibold)); Spacer(); Text("\(model.queue.count)").font(.system(size: 11, design: .monospaced)).foregroundStyle(palette.secondary) }
-                Text("当前队列 · 拖拽调整播放顺序").font(.system(size: 10)).foregroundStyle(palette.secondary)
-                SaveQueueMenu()
-                ScrollView {
-                    LazyVStack(spacing: 7) {
-                        ForEach(Array(model.queue.enumerated()), id: \.element.id) { index, item in
+        VStack(spacing: 0) {
+            PageHeader(title: "正在播放", detail: model.currentTrack?.format ?? "", palette: palette) {
+                Text(model.mode.title).font(.system(size: 11)).foregroundStyle(palette.secondary)
+            }
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "music.note").font(.system(size: 20, weight: .light)).foregroundStyle(palette.secondary).frame(width: 48, height: 48).background(palette.elevated, in: RoundedRectangle(cornerRadius: 7))
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(model.currentTrack?.title ?? "未选择音频").font(.system(size: 22, weight: .semibold)).lineLimit(2)
+                            Text(model.currentTrack?.folder ?? "从音乐库选择音频开始播放").font(.system(size: 11)).foregroundStyle(palette.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack(spacing: 7) {
+                            Text("音频频谱").font(.system(size: 11, weight: .medium))
+                            Spacer()
+                            Circle().fill(model.isPlaying ? palette.accent : palette.tertiary).frame(width: 4, height: 4)
+                            Text(spectrumEnabled ? (model.isPlaying ? "实时" : "已暂停") : "已关闭").font(.system(size: 10)).foregroundStyle(palette.secondary)
+                        }
+                        if spectrumEnabled {
+                            SpectrumPlot(display: model.spectrumDisplay, palette: palette, playing: model.isPlaying)
+                        } else {
+                            VStack(spacing: 8) {
+                                Image(systemName: "waveform").font(.system(size: 25, weight: .light))
+                                Text("可在设置中开启实时频谱").font(.system(size: 11))
+                            }.foregroundStyle(palette.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }.padding(16).frame(minHeight: 170, maxHeight: .infinity).background(palette.plot, in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(palette.border, lineWidth: 1))
+                    HStack(spacing: 0) {
+                        info("时长", value: timeLabel(model.currentTrack?.duration ?? 0))
+                        info("文件", value: model.currentTrack.map { ByteCountFormatter.string(fromByteCount: $0.fileSize, countStyle: .file) } ?? "—")
+                        info("队列位置", value: currentIndex.map { "\($0 + 1) / \(model.queue.count)" } ?? "—")
+                    }.padding(.vertical, 12).modifier(PanelStyle(palette: palette))
+                    VStack(alignment: .leading, spacing: 9) {
+                        Text("接下来").font(.system(size: 11, weight: .medium)).foregroundStyle(palette.secondary)
+                        if nextItems.isEmpty { Text(model.queue.isEmpty ? "播放后显示当前队列" : "已到队列末尾").font(.system(size: 11)).foregroundStyle(palette.tertiary).frame(height: 33) }
+                        ForEach(nextItems) { item in
                             let track = model.tracks.first { $0.id == item.trackID }
-                            HStack(spacing: 12) {
-                                Text(String(format: "%02d", index + 1)).font(.system(size: 10, design: .monospaced)).foregroundStyle(palette.secondary).frame(width: 20)
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text(track?.title ?? "音频不可用").font(.system(size: 12, weight: .medium)).lineLimit(2)
-                                    Text(track.map { ($0.folder as NSString).lastPathComponent } ?? "").font(.system(size: 10)).foregroundStyle(palette.secondary).lineLimit(1)
-                                }
-                                Spacer(minLength: 0)
-                                if item.id == model.currentID { Image(systemName: model.isPlaying ? "speaker.wave.2.fill" : "pause.fill").font(.system(size: 11)).foregroundStyle(palette.accent) }
-                                else { Text(timeLabel(track?.duration ?? 0)).font(.system(size: 9, design: .monospaced)).foregroundStyle(palette.secondary) }
-                            }.padding(13).background(item.id == model.currentID ? palette.accent.opacity(0.1) : palette.surface, in: RoundedRectangle(cornerRadius: 9))
-                                .overlay(RoundedRectangle(cornerRadius: 9).stroke(item.id == model.currentID ? palette.accent.opacity(0.4) : palette.border, lineWidth: 1))
-                                .contentShape(Rectangle()).onTapGesture(count: 2) { model.jump(item) }
-                                .contextMenu { Button("从这里播放") { model.jump(item) } }
-                                .onDrag { draggedID = item.id; return NSItemProvider(object: item.id as NSString) }
-                                .onDrop(of: [.text], isTargeted: nil) { _ in
-                                    guard let draggedID, let from = model.queue.firstIndex(where: { $0.id == draggedID }), let to = model.queue.firstIndex(where: { $0.id == item.id }), from != to else { return false }
-                                    model.moveQueue(from: IndexSet(integer: from), to: from < to ? to + 1 : to); self.draggedID = nil; return true
-                                }
+                            Button { model.jump(item) } label: {
+                                HStack {
+                                    Image(systemName: "music.note").foregroundStyle(palette.tertiary).font(.system(size: 10))
+                                    Text(track?.title ?? "音频不可用").lineLimit(1)
+                                    Spacer()
+                                    Text(timeLabel(track?.duration ?? 0)).monospacedDigit().foregroundStyle(palette.secondary)
+                                }.font(.system(size: 11)).frame(height: 25)
+                            }.buttonStyle(.plain).modifier(HoverHighlight())
                         }
                     }
-                    if model.queue.isEmpty { Text("播放音频后，队列会显示在这里。").font(.system(size: 12)).foregroundStyle(palette.secondary).padding(.top, 40) }
-                }
-            }.padding(24).frame(width: 300).background(palette.surface.opacity(0.3))
+                }.padding(20).frame(maxWidth: .infinity)
+                Rectangle().fill(palette.border).frame(width: 1)
+                queuePanel.frame(width: 280).background(palette.surface.opacity(0.45))
+            }
+        }.onAppear { model.setSpectrumVisible(true) }.onDisappear { model.setSpectrumVisible(false) }
+    }
+    private func info(_ label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label).font(.system(size: 10)).foregroundStyle(palette.secondary)
+            Text(value).font(.system(size: 12, weight: .medium)).monospacedDigit()
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14)
+    }
+    private var queuePanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("播放队列").font(.system(size: 12, weight: .semibold))
+                Text("\(model.queue.count)").font(.system(size: 10)).foregroundStyle(palette.secondary)
+                Spacer()
+                SaveQueueMenu().labelStyle(.iconOnly).help("保存队列到播放列表")
+            }.padding(.horizontal, 14).frame(height: 42)
+                .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
+            ScrollView {
+                LazyVStack(spacing: 1) {
+                    ForEach(Array(model.queue.enumerated()), id: \.element.id) { index, item in
+                        let track = model.tracks.first { $0.id == item.trackID }
+                        HStack(spacing: 9) {
+                            Group {
+                                if item.id == model.currentID { Image(systemName: model.isPlaying ? "speaker.wave.2.fill" : "pause.fill").font(.system(size: 9)).foregroundStyle(palette.accent) }
+                                else { Text(String(format: "%02d", index + 1)).font(.system(size: 9)).monospacedDigit().foregroundStyle(palette.tertiary) }
+                            }.frame(width: 17)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(track?.title ?? "音频不可用").font(.system(size: 11, weight: item.id == model.currentID ? .medium : .regular)).lineLimit(1)
+                                Text(track.map { ($0.folder as NSString).lastPathComponent } ?? "文件不可用").font(.system(size: 9)).foregroundStyle(palette.secondary).lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
+                            Text(timeLabel(track?.duration ?? 0)).font(.system(size: 10)).monospacedDigit().foregroundStyle(palette.secondary)
+                        }.padding(.horizontal, 9).frame(height: 43)
+                            .background(item.id == model.currentID ? palette.accent.opacity(0.075) : .clear, in: RoundedRectangle(cornerRadius: 4))
+                            .overlay(alignment: .leading) { if item.id == model.currentID { RoundedRectangle(cornerRadius: 1).fill(palette.accent.opacity(0.75)).frame(width: 2).padding(.vertical, 9) } }
+                            .contentShape(Rectangle()).modifier(HoverHighlight()).onTapGesture(count: 2) { model.jump(item) }
+                            .contextMenu { Button("从这里播放") { model.jump(item) } }
+                            .onDrag { draggedID = item.id; return NSItemProvider(object: item.id as NSString) }
+                            .onDrop(of: [.text], isTargeted: nil) { _ in
+                                guard let draggedID, let from = model.queue.firstIndex(where: { $0.id == draggedID }), let to = model.queue.firstIndex(where: { $0.id == item.id }), from != to else { return false }
+                                model.moveQueue(from: IndexSet(integer: from), to: from < to ? to + 1 : to); self.draggedID = nil; return true
+                            }
+                    }
+                }.padding(6)
+                if model.queue.isEmpty { Text("队列为空").font(.system(size: 11)).foregroundStyle(palette.secondary).padding(.top, 28) }
+            }
+            Text("拖拽排序 · 双击播放").font(.system(size: 9)).foregroundStyle(palette.tertiary).padding(.horizontal, 14).frame(height: 28)
         }
     }
 }
@@ -346,68 +417,90 @@ struct StatisticsView: View {
     }
     func total(since: Date) -> Double { let key = ListeningClock.day(since); return model.stats.days.filter { $0.day >= key }.reduce(0) { $0 + $1.seconds } }
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 25) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("A LITTLE, EVERY DAY").font(.system(size: 9, design: .monospaced)).tracking(2).foregroundStyle(palette.secondary)
-                    Text("听见日积月累").font(.system(size: 29, weight: .semibold))
-                    Text("每一段真实播放，都在这里留下记录。").font(.system(size: 12)).foregroundStyle(palette.secondary)
-                }
-                HStack(spacing: 12) {
-                    statCard("今日熏听", value: listeningLabel(total(since: Calendar.current.startOfDay(for: Date()))), icon: "sun.max")
-                    statCard("本周熏听", value: listeningLabel(total(since: weekStart)), icon: "calendar")
-                    statCard("本月熏听", value: listeningLabel(total(since: Calendar.current.dateInterval(of: .month, for: Date())!.start)), icon: "clock")
-                    statCard("完整播放", value: "\(model.stats.completions) 次", icon: "checkmark.circle")
-                }
-                VStack(alignment: .leading, spacing: 22) {
-                    HStack { Text("最近 7 天").font(.system(size: 15, weight: .semibold)); Spacer(); Text("实际播放时长 / 分钟").font(.system(size: 10)).foregroundStyle(palette.secondary) }
-                    Chart(days) { day in BarMark(x: .value("日期", String(day.day.suffix(5))), y: .value("分钟", day.seconds / 60)).foregroundStyle(palette.accent).cornerRadius(4) }
-                        .chartYScale(domain: 0...max(1, (days.map { $0.seconds / 60 }.max() ?? 0) * 1.2)).frame(height: 170)
-                    if days.allSatisfy({ $0.seconds == 0 }) { Text("开始播放后，这里会显示你的真实熏听记录。").font(.system(size: 11)).foregroundStyle(palette.secondary) }
-                }.padding(22).background(palette.surface, in: RoundedRectangle(cornerRadius: 12))
-                Text("常听的音频").font(.system(size: 17, weight: .semibold))
-                if model.stats.tracks.isEmpty {
-                    Text("还没有播放记录。每天一点，慢慢积累。").font(.system(size: 12)).foregroundStyle(palette.secondary).padding(.vertical, 15)
-                } else {
-                    ForEach(Array(model.stats.tracks.prefix(10).enumerated()), id: \.element.trackID) { index, stat in
-                        HStack(spacing: 16) {
-                            Text(String(format: "%02d", index + 1)).font(.system(size: 11, design: .monospaced)).foregroundStyle(palette.secondary)
-                            Text(model.tracks.first { $0.id == stat.trackID }?.title ?? "历史音频").font(.system(size: 13)).lineLimit(1)
-                            Spacer()
-                            Text("\(stat.completions) 次完整播放").font(.system(size: 11)).foregroundStyle(palette.secondary)
-                            Text(listeningLabel(stat.seconds)).font(.system(size: 12, weight: .medium)).frame(width: 110, alignment: .trailing)
-                        }.padding(15).background(palette.surface, in: RoundedRectangle(cornerRadius: 9))
+        VStack(spacing: 0) {
+            PageHeader(title: "播放统计", detail: Date().formatted(.dateTime.month().day()), palette: palette) { Text("实际播放记录").font(.system(size: 11)).foregroundStyle(palette.secondary) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack(spacing: 0) {
+                        stat("今日时长", value: listeningLabel(total(since: Calendar.current.startOfDay(for: Date()))))
+                        Rectangle().fill(palette.border).frame(width: 1).padding(.vertical, 16)
+                        stat("本周时长", value: listeningLabel(total(since: weekStart)))
+                        Rectangle().fill(palette.border).frame(width: 1).padding(.vertical, 16)
+                        stat("本月时长", value: listeningLabel(total(since: Calendar.current.dateInterval(of: .month, for: Date())!.start)))
+                        Rectangle().fill(palette.border).frame(width: 1).padding(.vertical, 16)
+                        stat("完整播放", value: "\(model.stats.completions) 次")
+                    }.frame(height: 78).modifier(PanelStyle(palette: palette))
+                    VStack(alignment: .leading, spacing: 15) {
+                        HStack { Text("最近 7 天").font(.system(size: 12, weight: .medium)); Spacer(); Text("分钟").font(.system(size: 10)).foregroundStyle(palette.secondary) }
+                        Chart(days) { day in BarMark(x: .value("日期", String(day.day.suffix(5))), y: .value("分钟", day.seconds / 60)).foregroundStyle(palette.accent.opacity(0.7)).cornerRadius(2) }
+                            .chartYScale(domain: 0...max(1, (days.map { $0.seconds / 60 }.max() ?? 0) * 1.2)).chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)); AxisValueLabel().font(.system(size: 9)) } }
+                            .frame(height: 142)
+                        if days.allSatisfy({ $0.seconds == 0 }) { Text("播放音频后显示每日时长").font(.system(size: 10)).foregroundStyle(palette.secondary) }
+                    }.padding(16).modifier(PanelStyle(palette: palette))
+                    VStack(spacing: 0) {
+                        HStack { Text("常听音频").font(.system(size: 12, weight: .medium)); Spacer(); Text("按累计时长排序").font(.system(size: 10)).foregroundStyle(palette.secondary) }.padding(.bottom, 10)
+                        HStack { Text("#").frame(width: 26, alignment: .leading); Text("名称"); Spacer(); Text("完整播放").frame(width: 80, alignment: .trailing); Text("累计时长").frame(width: 125, alignment: .trailing) }
+                            .font(.system(size: 10)).foregroundStyle(palette.secondary).frame(height: 27).overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
+                        if model.stats.tracks.isEmpty { Text("暂无播放记录").font(.system(size: 11)).foregroundStyle(palette.secondary).frame(maxWidth: .infinity).frame(height: 60) }
+                        ForEach(Array(model.stats.tracks.prefix(20).enumerated()), id: \.element.trackID) { index, item in
+                            HStack {
+                                Text(String(format: "%02d", index + 1)).font(.system(size: 10)).monospacedDigit().foregroundStyle(palette.tertiary).frame(width: 26, alignment: .leading)
+                                Text(model.tracks.first { $0.id == item.trackID }?.title ?? "历史音频").font(.system(size: 12)).lineLimit(1)
+                                Spacer()
+                                Text("\(item.completions)").frame(width: 80, alignment: .trailing)
+                                Text(listeningLabel(item.seconds)).frame(width: 125, alignment: .trailing)
+                            }.font(.system(size: 11)).monospacedDigit().frame(height: 32).background(index.isMultiple(of: 2) ? palette.surface.opacity(0.5) : .clear)
+                        }
                     }
-                }
-            }.padding(32)
+                }.padding(20)
+            }
         }
     }
-    var weekStart: Date {
-        var calendar = Calendar.current; calendar.firstWeekday = 2
-        return calendar.dateInterval(of: .weekOfYear, for: Date())!.start
-    }
-    func statCard(_ title: String, value: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 19) {
-            HStack { Text(title).font(.system(size: 11)); Spacer(); Image(systemName: icon).foregroundStyle(palette.accent) }.foregroundStyle(palette.secondary)
-            Text(value).font(.system(size: 18, weight: .medium)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
-        }.padding(17).frame(maxWidth: .infinity, alignment: .leading).background(palette.surface, in: RoundedRectangle(cornerRadius: 11))
+    var weekStart: Date { var calendar = Calendar.current; calendar.firstWeekday = 2; return calendar.dateInterval(of: .weekOfYear, for: Date())!.start }
+    private func stat(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 10)).foregroundStyle(palette.secondary)
+            Text(value).font(.system(size: 21, weight: .medium)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 17)
     }
 }
 struct SettingsView: View {
+    @Environment(\.colorScheme) var scheme
     @AppStorage("appearance") var appearance = "system"
     @AppStorage("accent") var accent = "blue"
+    @AppStorage("spectrumEnabled") var spectrumEnabled = true
+    var palette: Palette { Palette(dark: scheme == .dark, accentName: accent) }
+    let accents = [("blue", "冰川蓝"), ("mint", "薄荷绿"), ("lavender", "薰衣草紫"), ("coral", "暖珊瑚")]
     var body: some View {
         Form {
             Section("外观") {
-                Picker("主题", selection: $appearance) { Text("跟随系统").tag("system"); Text("深色").tag("dark"); Text("浅色").tag("light") }
-                Picker("强调色", selection: $accent) { Text("冰川蓝").tag("blue"); Text("薄荷绿").tag("mint"); Text("薰衣草紫").tag("lavender"); Text("暖珊瑚").tag("coral") }
+                Picker("主题", selection: $appearance) { Text("跟随系统").tag("system"); Text("浅色").tag("light"); Text("深色").tag("dark") }.pickerStyle(.segmented)
+                HStack {
+                    Text("强调色")
+                    Spacer()
+                    ForEach(accents, id: \.0) { name, title in
+                        let color = Palette(dark: scheme == .dark, accentName: name).accent
+                        Button { accent = name } label: {
+                            Circle().fill(color).frame(width: 21, height: 21)
+                                .overlay { if accent == name { Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(scheme == .dark ? Color.black.opacity(0.75) : .white) } }
+                                .padding(3).overlay(Circle().stroke(accent == name ? color.opacity(0.65) : .clear, lineWidth: 1))
+                        }.buttonStyle(.plain).help(title).accessibilityLabel(title).accessibilityValue(accent == name ? "已选择" : "")
+                    }
+                }
             }
-            Section("关于 Little Ears") {
-                Text("本地音频，完全离线。原始文件不会被复制或修改。").font(.callout)
-                Text("完整播放：自然结束并覆盖至少 90% 的音频内容。播放记录每 5 秒保存；重启后保持暂停。").font(.caption).foregroundStyle(.secondary)
-                Text("Little Ears 0.2 · 音乐库 / 播放列表 / 播放统计").font(.caption).foregroundStyle(.secondary)
+            Section("播放") { Toggle("显示实时音频频谱", isOn: $spectrumEnabled) }
+            Section("关于") {
+                HStack {
+                    Image(systemName: "ear.badge.waveform").font(.system(size: 24, weight: .light)).foregroundStyle(palette.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Little Ears").font(.system(size: 13, weight: .semibold))
+                        Text("0.3 · 本地音频播放器").font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                Text("引用本地文件，不复制或修改原始音频。播放队列与统计自动保存。").font(.system(size: 11)).foregroundStyle(.secondary)
             }
-        }.formStyle(.grouped).padding(12).frame(width: 440, height: 310)
-            .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
+        }.formStyle(.grouped).padding(8).frame(width: 490, height: 390)
+            .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light).tint(palette.accent)
     }
 }
