@@ -121,6 +121,7 @@ struct Playlist: Codable, Identifiable, FetchableRecord, PersistableRecord, Send
     static let databaseTableName = "playlists"
     var id = UUID().uuidString
     var name: String
+    var position = 0
     var createdAt = Date()
     var updatedAt = Date()
 }

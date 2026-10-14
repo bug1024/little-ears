@@ -52,5 +52,18 @@ struct LittleEarsApp: App {
 struct MainScene: View {
     @Environment(\.openWindow) var openWindow
     let delegate: AppDelegate
-    var body: some View { ContentView().onAppear { delegate.reopen = { openWindow(id: "main") } } }
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        ContentView()
+            .background(PlaybackKeyboardShortcuts { command in
+                switch command {
+                case .togglePlayback: model.togglePlayback()
+                case .previous: model.previousTrack()
+                case .next: model.next()
+                case .volumeUp: model.adjustVolume(by: 0.05)
+                case .volumeDown: model.adjustVolume(by: -0.05)
+                }
+            })
+            .onAppear { delegate.reopen = { openWindow(id: "main") } }
+    }
 }

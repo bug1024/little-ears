@@ -22,7 +22,7 @@ enum PreviewRenderer {
                 model.page = page
                 let width: CGFloat = name.hasPrefix("compact") ? 900 : 1140
                 let height: CGFloat = name.hasPrefix("compact") ? 600 : 730
-                let content = ContentView().environmentObject(model).environment(\.colorScheme, dark ? .dark : .light)
+                let content = ContentView(persistSidebarWidth: false).environmentObject(model).environment(\.colorScheme, dark ? .dark : .light)
                 let hosting = NSHostingView(rootView: content)
                 let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.borderless], backing: .buffered, defer: false)
                 window.contentView = hosting
@@ -34,6 +34,15 @@ enum PreviewRenderer {
                 hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
                 if let png = bitmap.representation(using: .png, properties: [:]) { try png.write(to: target.appendingPathComponent(name + ".png")) }
                 window.contentView = nil
+            }
+            try await verifySidebar(model: model, target: target)
+            if model.currentTrack != nil {
+                model.page = "playing"; model.playCurrent()
+                try? await Task.sleep(for: .milliseconds(150))
+                for dark in [true, false] {
+                    try await snapshot(ContentView(persistSidebarWidth: false).environmentObject(model).environment(\.colorScheme, dark ? .dark : .light), name: dark ? "playing-active-dark" : "playing-active-light", width: 1140, height: 730, dark: dark, target: target)
+                }
+                model.pause()
             }
             for dark in [true, false] {
                 let hosting = NSHostingView(rootView: SettingsView().environment(\.colorScheme, dark ? .dark : .light))
@@ -55,7 +64,7 @@ enum PreviewRenderer {
             while !empty.ready && empty.errorMessage == nil { try? await Task.sleep(for: .milliseconds(50)) }
             for (page, name, dark) in [("library", "empty-library-light", false), ("playing", "empty-playing-dark", true)] {
                 empty.page = page
-                let content = ContentView().environmentObject(empty).environment(\.colorScheme, dark ? .dark : .light)
+                let content = ContentView(persistSidebarWidth: false).environmentObject(empty).environment(\.colorScheme, dark ? .dark : .light)
                 try await snapshot(content, name: name, width: 1140, height: 730, dark: dark, target: target)
             }
             await empty.shutdown()
@@ -67,7 +76,7 @@ enum PreviewRenderer {
     static func measureNavigation(libraryPath: String, model: AppModel) async {
         while !model.ready && model.errorMessage == nil { try? await Task.sleep(for: .milliseconds(50)) }
         await model.importSources([URL(fileURLWithPath: libraryPath)])
-        let hosting = NSHostingView(rootView: ContentView().environmentObject(model).environment(\.colorScheme, .dark))
+        let hosting = NSHostingView(rootView: ContentView(persistSidebarWidth: false).environmentObject(model).environment(\.colorScheme, .dark))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1140, height: 730), styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = hosting; hosting.frame = NSRect(x: 0, y: 0, width: 1140, height: 730)
         window.appearance = NSAppearance(named: .darkAqua)
@@ -93,6 +102,45 @@ enum PreviewRenderer {
         if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), let string = String(data: data, encoding: .utf8) { print(string) }
         window.contentView = nil
         await model.shutdown(); exit(0)
+    }
+
+    /// Exercises AppKit's actual divider constraints separately from visual snapshots.
+    private static func verifySidebar(model: AppModel, target: URL) async throws {
+        model.page = "playing"
+        let hosting = NSHostingView(rootView: ContentView(persistSidebarWidth: false).environmentObject(model).environment(\.colorScheme, .dark))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1140, height: 730), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = hosting; window.appearance = NSAppearance(named: .darkAqua)
+        hosting.frame = NSRect(x: 0, y: 0, width: 1140, height: 730)
+        hosting.layoutSubtreeIfNeeded()
+        try? await Task.sleep(for: .milliseconds(200))
+        func findSplit(_ view: NSView) -> NSSplitView? {
+            if let split = view as? NSSplitView { return split }
+            for child in view.subviews { if let split = findSplit(child) { return split } }
+            return nil
+        }
+        guard let split = findSplit(hosting), let sidebar = split.subviews.first else {
+            throw NSError(domain: "LittleEars.Preview", code: 1, userInfo: [NSLocalizedDescriptionKey: "Native sidebar divider missing"])
+        }
+        var results: [String] = []
+        for (width, requested, expected, name) in [(1140.0, 100.0, 196.0, "sidebar-minimum"), (1140.0, 340.0, 340.0, "sidebar-wide"), (1140.0, 500.0, 360.0, "sidebar-maximum"), (900.0, 500.0, 280.0, "sidebar-compact")] {
+            window.setContentSize(NSSize(width: width, height: 730))
+            hosting.layoutSubtreeIfNeeded()
+            try? await Task.sleep(for: .milliseconds(100))
+            split.setPosition(requested, ofDividerAt: 0)
+            hosting.layoutSubtreeIfNeeded()
+            try? await Task.sleep(for: .milliseconds(100))
+            let actual = sidebar.frame.width
+            results.append("window=\(width), requested=\(requested), actual=\(actual), expected=\(expected)")
+            guard abs(actual - expected) < 2 else {
+                throw NSError(domain: "LittleEars.Preview", code: 2, userInfo: [NSLocalizedDescriptionKey: results.joined(separator: "\n")])
+            }
+            if let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) {
+                hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+                try bitmap.representation(using: .png, properties: [:])?.write(to: target.appendingPathComponent(name + ".png"))
+            }
+        }
+        try results.joined(separator: "\n").write(to: target.appendingPathComponent("sidebar-validation.txt"), atomically: true, encoding: .utf8)
+        window.contentView = nil
     }
 
     private static func snapshot<V: View>(_ view: V, name: String, width: CGFloat, height: CGFloat, dark: Bool, target: URL) async throws {

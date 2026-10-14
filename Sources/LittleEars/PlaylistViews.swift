@@ -112,12 +112,15 @@ struct PlaylistsView: View {
                 HStack(spacing: 10) {
                     Button { model.playPlaylist(playlist) } label: { Label("播放", systemImage: "play.fill") }.disabled(entries.isEmpty)
                     Button { model.page = "library" } label: { Label("添加歌曲", systemImage: "plus") }
+                    Button(role: .destructive) { remove(selection, from: playlist) } label: {
+                        Label("移除所选", systemImage: "minus.circle")
+                    }.disabled(selection.isEmpty || model.savingPlaylists).help("只从此播放列表移除选中条目，保留音频文件")
                     Spacer()
                     if model.savingPlaylists { ProgressView().controlSize(.small) }
                     Menu {
                         Button("重命名…") { model.playlistDraft = PlaylistDraft(playlistID: playlist.id, name: playlist.name) }
                         Button("删除播放列表…", role: .destructive) { deleting = true }
-                    } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize().disabled(model.savingPlaylists)
+                    } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize().disabled(model.savingPlaylists).help("管理播放列表：重命名或删除")
                 }.font(.system(size: 11)).padding(.horizontal, 20).frame(height: 42)
                 if entries.isEmpty { emptyState("这个列表还没有歌曲", detail: "到音乐库中多选音频，点击「加入播放列表」。") }
                 else {
@@ -125,19 +128,6 @@ struct PlaylistsView: View {
                     List(selection: $selection) {
                         ForEach(Array(entries.enumerated()), id: \.element.id) { index, item in
                             row(item, index: index).tag(item.id).listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(Color.clear)
-                                .onTapGesture(count: 2) { model.playPlaylist(playlist, at: item.id) }
-                                .contextMenu {
-                                    Button("从这里播放") { model.playPlaylist(playlist, at: item.id) }
-                                    Button("从列表移除", role: .destructive) {
-                                        let ids = selection.contains(item.id) ? selection : [item.id]
-                                        Task {
-                                            do { try await model.removePlaylistItems(in: playlist, ids: ids); selection.subtract(ids) }
-                                            catch { model.errorMessage = error.localizedDescription }
-                                        }
-                                    }.disabled(model.savingPlaylists)
-                                    if let track = model.tracks.first(where: { $0.id == item.trackID }) { Button("在 Finder 中显示") { model.reveal(track) } }
-                                }
-                                .onDrag { NSItemProvider(object: item.id as NSString) }
                                 .onDrop(of: [.text], isTargeted: nil) { providers in
                                     guard !model.savingPlaylists, let provider = providers.first else { return false }
                                     _ = provider.loadObject(ofClass: NSString.self) { object, _ in
@@ -152,9 +142,25 @@ struct PlaylistsView: View {
                                     return true
                                 }
                         }
-                    }.listStyle(.plain).scrollContentBackground(.hidden).contentMargins(.horizontal, 0, for: .scrollContent).modifier(MaterialSurface(palette: palette, radius: 9, inset: true)).padding(.horizontal, 12).padding(.bottom, 8)
+                    }.contextMenu(forSelectionType: String.self) { ids in
+                        Button("从这里播放") {
+                            if let item = entries.first(where: { ids.contains($0.id) }) { model.playPlaylist(playlist, at: item.id) }
+                        }.disabled(ids.isEmpty)
+                        Button(ids.count > 1 ? "移除所选 \(ids.count) 首" : "从列表移除", role: .destructive) { remove(ids, from: playlist) }
+                            .disabled(ids.isEmpty || model.savingPlaylists)
+                        if ids.count == 1, let item = entries.first(where: { ids.contains($0.id) }), let track = model.tracks.first(where: { $0.id == item.trackID }) {
+                            Button("在 Finder 中显示") { model.reveal(track) }
+                        }
+                    } primaryAction: { ids in
+                        if let item = entries.first(where: { ids.contains($0.id) }) { model.playPlaylist(playlist, at: item.id) }
+                    }
+                    .onDeleteCommand { remove(selection, from: playlist) }
+                    .listStyle(.plain).scrollContentBackground(.hidden).contentMargins(.horizontal, 0, for: .scrollContent).modifier(MaterialSurface(palette: palette, radius: 9, inset: true)).padding(.horizontal, 12).padding(.bottom, 8)
                     HStack {
-                        Text("拖拽排序 · 顺序自动保存")
+                        Text(selection.isEmpty ? "⌘ 点击多选 · Shift 连选 · 拖动左侧手柄排序" : "已选择 \(selection.count) 首")
+                        Button(selection.isEmpty ? "全选" : "取消选择") {
+                            selection = selection.isEmpty ? Set(entries.map(\.id)) : []
+                        }.buttonStyle(.plain).foregroundStyle(palette.accent)
                         Spacer()
                         Text("\(entries.count) 首音频")
                     }.font(.system(size: 10)).foregroundStyle(palette.secondary).padding(.horizontal, 20).frame(height: 27)
@@ -163,6 +169,7 @@ struct PlaylistsView: View {
             } else { emptyState("没有播放列表", detail: "新建列表，或保存当前播放队列。") }
         }
             .onChange(of: playlist?.id) { _, _ in selection.removeAll() }
+            .onChange(of: entries.map(\.id)) { _, ids in selection.formIntersection(ids) }
             .alert("删除「\(playlist?.name ?? "")」？", isPresented: $deleting) {
                 Button("取消", role: .cancel) {}
                 Button("删除", role: .destructive) {
@@ -173,6 +180,13 @@ struct PlaylistsView: View {
                     }
                 }
             } message: { Text("只删除播放列表，原始音频、播放记录和当前队列都会保留。") }
+    }
+    private func remove(_ ids: Set<String>, from playlist: Playlist) {
+        guard !ids.isEmpty, !model.savingPlaylists else { return }
+        Task {
+            do { try await model.removePlaylistItems(in: playlist, ids: ids); selection.subtract(ids) }
+            catch { model.errorMessage = error.localizedDescription }
+        }
     }
     private func emptyState(_ title: String, detail: String) -> some View {
         VStack(spacing: 12) {
@@ -187,6 +201,6 @@ struct PlaylistsView: View {
         let track = model.tracks.first { $0.id == item.trackID }
         return TrackTableRow(palette: palette, index: index, title: track?.title ?? "音频不可用",
                              origin: track.map { $0.available ? ($0.folder.isEmpty ? "本地音频" : $0.folder) : "文件不可用" } ?? "记录不可用",
-                             duration: track?.duration ?? 0, format: track?.format ?? "—", selected: selection.contains(item.id), draggable: true)
+                             duration: track?.duration ?? 0, format: track?.format ?? "—", selected: selection.contains(item.id), draggable: true, dragItemID: item.id)
     }
 }

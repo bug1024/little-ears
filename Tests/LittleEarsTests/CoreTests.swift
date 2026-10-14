@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 import AVFoundation
 import GRDB
 import Combine
@@ -332,6 +333,170 @@ final class CoreTests: XCTestCase {
         XCTAssertFalse(stored.1.contains { $0.playlistID == playlist.id })
     }
     @MainActor
+    func testBatchPlaylistEditsKeepOrderDuplicateIdentityFilesAndQueue() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let music = directory.appendingPathComponent("Music")
+        try FileManager.default.createDirectory(at: music, withIntermediateDirectories: true)
+        for name in ["A", "B", "C"] { try Self.writeWAV(music.appendingPathComponent(name + ".wav"), seconds: 1) }
+        let path = directory.appendingPathComponent("batch.sqlite").path
+        let model = AppModel(databasePath: path, remoteControls: false)
+        for _ in 0..<50 { if model.ready { break }; try await Task.sleep(for: .milliseconds(20)) }
+        await model.importSources([music])
+        let tracks = model.visibleTracks
+        XCTAssertEqual(tracks.map(\.title), ["A", "B", "C"])
+        let playlist = try await model.createPlaylist(name: "批量编辑", trackIDs: tracks.map(\.id))
+        try await model.appendTracks([tracks[0].id, tracks[1].id], to: playlist)
+        let original = model.items(in: playlist.id)
+        XCTAssertEqual(original.map(\.trackID), [tracks[0].id, tracks[1].id, tracks[2].id, tracks[0].id, tracks[1].id])
+        model.queue = original.map { QueueItem(trackID: $0.trackID) }
+        model.currentID = model.queue[3].id
+        let queue = model.queue
+        let current = model.currentID
+        try await model.removePlaylistItems(in: playlist, ids: [original[0].id, original[2].id, original[4].id])
+        let remaining = model.items(in: playlist.id)
+        XCTAssertEqual(remaining.map(\.id), [original[1].id, original[3].id], "Remove selected occurrences, preserving the other duplicate")
+        XCTAssertEqual(remaining.map(\.position), [0, 1])
+        XCTAssertEqual(model.queue, queue)
+        XCTAssertEqual(model.currentID, current)
+        XCTAssertEqual(model.tracks.count, 3)
+        for name in ["A", "B", "C"] { XCTAssertTrue(FileManager.default.fileExists(atPath: music.appendingPathComponent(name + ".wav").path)) }
+        await model.shutdown()
+        let restored = AppModel(databasePath: path, remoteControls: false)
+        for _ in 0..<50 { if restored.ready { break }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(restored.items(in: playlist.id).map(\.id), remaining.map(\.id))
+        XCTAssertEqual(restored.queue, queue)
+        XCTAssertEqual(restored.currentID, current)
+        await restored.shutdown()
+    }
+    @MainActor
+    func testPlaylistOrderPersistsThroughRenameDeleteAndCreation() async throws {
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".sqlite").path
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let model = AppModel(databasePath: path, remoteControls: false)
+        for _ in 0..<50 { if model.ready { break }; try await Task.sleep(for: .milliseconds(20)) }
+        let a = try await model.createPlaylist(name: "A", trackIDs: [])
+        let b = try await model.createPlaylist(name: "B", trackIDs: [])
+        let c = try await model.createPlaylist(name: "C", trackIDs: [])
+        model.selectedPlaylistID = b.id
+        model.queue = [QueueItem(trackID: "independent")]; model.currentID = model.queue[0].id
+        let queue = model.queue
+        try await model.movePlaylists(from: IndexSet(integer: 2), to: 0)
+        XCTAssertEqual(model.playlists.map(\.id), [c.id, a.id, b.id])
+        XCTAssertEqual(model.playlists.map(\.position), [0, 1, 2])
+        XCTAssertEqual(model.selectedPlaylistID, b.id)
+        try await model.renamePlaylist(c, name: "C renamed")
+        XCTAssertEqual(model.playlists.map(\.id), [c.id, a.id, b.id], "Renaming through an old value must keep the new position")
+        try await model.movePlaylists(from: IndexSet(integer: 0), to: 3)
+        XCTAssertEqual(model.playlists.map(\.id), [a.id, b.id, c.id])
+        try await model.deletePlaylist(b)
+        XCTAssertEqual(model.selectedPlaylistID, a.id)
+        let d = try await model.createPlaylist(name: "D", trackIDs: [])
+        XCTAssertEqual(model.playlists.map(\.id), [a.id, c.id, d.id])
+        XCTAssertEqual(model.queue, queue)
+        let saved = model.playlists
+        await model.shutdown()
+        let restored = AppModel(databasePath: path, remoteControls: false)
+        for _ in 0..<50 { if restored.ready { break }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(restored.playlists.map(\.id), saved.map(\.id))
+        XCTAssertEqual(restored.playlists.map(\.name), saved.map(\.name))
+        XCTAssertEqual(restored.playlists.map(\.position), saved.map(\.position))
+        for (actual, expected) in zip(restored.playlists, saved) {
+            XCTAssertEqual(actual.updatedAt.timeIntervalSince1970, expected.updatedAt.timeIntervalSince1970, accuracy: 0.001)
+        }
+        XCTAssertEqual(restored.queue, queue)
+        await restored.shutdown()
+    }
+    func testPlaylistOrderMigrationPreservesExistingCreationOrderAndEntries() async throws {
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".sqlite").path
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let original = try LibraryDatabase(path: path)
+        let a = Playlist(name: "A", createdAt: Date(timeIntervalSince1970: 10))
+        let b = Playlist(name: "B", createdAt: Date(timeIntervalSince1970: 20))
+        let item = PlaylistItem(playlistID: b.id, trackID: "unchanged", position: 0)
+        try await original.savePlaylist(b, items: [item])
+        try await original.savePlaylist(a, items: [])
+        let raw = try DatabaseQueue(path: path)
+        try await raw.write { db in
+            try db.execute(sql: "ALTER TABLE playlists DROP COLUMN position; DELETE FROM grdb_migrations WHERE identifier = 'v4-playlist-order'")
+        }
+        let upgraded = try LibraryDatabase(path: path)
+        let lists = try await upgraded.loadPlaylists()
+        XCTAssertEqual(lists.0.map(\.id), [a.id, b.id])
+        XCTAssertEqual(lists.0.map(\.position), [0, 1])
+        XCTAssertEqual(lists.1, [item])
+        try await upgraded.savePlaylistOrder([b.id, a.id])
+        let reordered = try await upgraded.loadPlaylists()
+        XCTAssertEqual(reordered.0.map(\.id), [b.id, a.id])
+        XCTAssertEqual(reordered.1, [item])
+    }
+    @MainActor
+    func testSpaceShortcutPreservesEditingControlsSheetsAndModifiedKeys() throws {
+        func event(_ flags: NSEvent.ModifierFlags = [], key: UInt16 = 49) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: key))
+        }
+        let space = try event()
+        XCTAssertTrue(PlaybackKeyboardShortcuts.shouldHandle(space, responder: NSTableView(), hasSheet: false))
+        for responder: NSResponder in [NSTextView(), NSTextField(), NSSearchField(), NSButton(), NSPopUpButton()] {
+            XCTAssertFalse(PlaybackKeyboardShortcuts.shouldHandle(space, responder: responder, hasSheet: false))
+        }
+        XCTAssertFalse(PlaybackKeyboardShortcuts.shouldHandle(space, responder: nil, hasSheet: true))
+        for flags: NSEvent.ModifierFlags in [.command, .option, .control, .shift] {
+            XCTAssertFalse(PlaybackKeyboardShortcuts.shouldHandle(try event(flags), responder: nil, hasSheet: false))
+        }
+        XCTAssertFalse(PlaybackKeyboardShortcuts.shouldHandle(try event(key: 36), responder: nil, hasSheet: false))
+    }
+    @MainActor
+    func testArrowShortcutsRespectNativeFocusAndRepeatPolicy() throws {
+        for (key, expected) in [(UInt16(123), PlaybackKeyboardShortcuts.Command.previous), (124, .next), (125, .volumeDown), (126, .volumeUp)] {
+            let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: key))
+            XCTAssertEqual(PlaybackKeyboardShortcuts.command(for: event, responder: NSView(), hasSheet: false), expected)
+            for control: NSView in [NSSlider(), NSTextView(), NSTextField(), NSPopUpButton()] {
+                XCTAssertNil(PlaybackKeyboardShortcuts.command(for: event, responder: control, hasSheet: false))
+                let child = NSView(); control.addSubview(child)
+                XCTAssertNil(PlaybackKeyboardShortcuts.command(for: event, responder: child, hasSheet: false))
+            }
+            for control: NSView in [NSTableView(), NSOutlineView(), NSCollectionView(), NSButton()] {
+                XCTAssertEqual(PlaybackKeyboardShortcuts.command(for: event, responder: control, hasSheet: false), expected)
+            }
+            XCTAssertNil(PlaybackKeyboardShortcuts.command(for: event, responder: nil, hasSheet: true))
+        }
+        XCTAssertTrue(PlaybackKeyboardShortcuts.Command.volumeUp.allowsRepeat)
+        XCTAssertTrue(PlaybackKeyboardShortcuts.Command.volumeDown.allowsRepeat)
+        XCTAssertFalse(PlaybackKeyboardShortcuts.Command.previous.allowsRepeat)
+        XCTAssertFalse(PlaybackKeyboardShortcuts.Command.next.allowsRepeat)
+    }
+    @MainActor
+    func testKeyboardVolumeLimitsPersistAndPreviousSkipsElapsedTrack() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let music = directory.appendingPathComponent("Music")
+        try FileManager.default.createDirectory(at: music, withIntermediateDirectories: true)
+        for name in ["A", "B"] { try Self.writeWAV(music.appendingPathComponent(name + ".wav"), seconds: 5) }
+        let path = directory.appendingPathComponent("keys.sqlite").path
+        let model = AppModel(databasePath: path, remoteControls: false)
+        for _ in 0..<50 { if model.ready { break }; try await Task.sleep(for: .milliseconds(20)) }
+        await model.importSources([music]); model.volume = 0
+        let tracks = model.visibleTracks
+        model.start(tracks, at: tracks[1]); model.pause(); model.seek(4)
+        model.previousTrack(); model.pause()
+        XCTAssertEqual(model.currentTrack?.id, tracks[0].id, "Left must select the previous song even after three seconds")
+        model.next(); model.pause()
+        XCTAssertEqual(model.currentTrack?.id, tracks[1].id)
+        model.volume = 0.98; model.adjustVolume(by: 0.05); XCTAssertEqual(model.volume, 1)
+        model.adjustVolume(by: 0.05); XCTAssertEqual(model.volume, 1)
+        model.volume = 0.02; model.adjustVolume(by: -0.05); XCTAssertEqual(model.volume, 0)
+        model.adjustVolume(by: -0.05); XCTAssertEqual(model.volume, 0)
+        model.adjustVolume(by: 0.05); XCTAssertEqual(model.volume, 0.05, accuracy: 0.0001)
+        await model.shutdown()
+        let restored = AppModel(databasePath: path, remoteControls: false)
+        for _ in 0..<50 { if restored.ready { break }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(restored.volume, 0.05, accuracy: 0.0001)
+        await restored.shutdown()
+    }
+    @MainActor
     func testEmptyPlaylistNameRejectedWithoutCreatingRecords() async throws {
         let model = AppModel(databasePath: ":memory:", remoteControls: false)
         for _ in 0..<50 { if model.ready { break }; try await Task.sleep(for: .milliseconds(100)) }
@@ -358,7 +523,7 @@ final class CoreTests: XCTestCase {
         // Reconstruct the previous release's schema, then run the new migration.
         let raw = try DatabaseQueue(path: url.path)
         try await raw.write { db in
-            try db.execute(sql: "DROP TABLE playlistItems; DROP TABLE playlists; DELETE FROM grdb_migrations WHERE identifier = 'v3-playlists'")
+            try db.execute(sql: "DROP TABLE playlistItems; DROP TABLE playlists; DELETE FROM grdb_migrations WHERE identifier IN ('v3-playlists', 'v4-playlist-order')")
         }
         let upgraded = try LibraryDatabase(path: url.path)
         let library = try await upgraded.loadLibrary()

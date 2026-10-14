@@ -145,11 +145,21 @@ struct TrackTableRow: View {
     var current = false
     var selected = false
     var draggable = false
+    var dragItemID: String?
+    @ViewBuilder private var leadingIcon: some View {
+        if let dragItemID {
+            Image(systemName: "line.3.horizontal")
+                .frame(width: 15, height: 32).contentShape(Rectangle())
+                .onDrag { NSItemProvider(object: dragItemID as NSString) }
+                .help("拖动调整顺序").accessibilityLabel("排序手柄")
+        } else {
+            Image(systemName: current ? "speaker.wave.2.fill" : draggable ? "line.3.horizontal" : "music.note").frame(width: 15)
+        }
+    }
     var body: some View {
         GeometryReader { proxy in
             HStack(spacing: 10) {
-                Image(systemName: current ? "speaker.wave.2.fill" : draggable ? "line.3.horizontal" : "music.note")
-                    .font(.system(size: 10)).foregroundStyle(current ? palette.accent : palette.tertiary).frame(width: 15)
+                leadingIcon.font(.system(size: 10)).foregroundStyle(current ? palette.accent : palette.tertiary)
                 Text(String(format: "%02d", index + 1)).font(.system(size: 10, design: .monospaced)).foregroundStyle(palette.tertiary).frame(width: 25, alignment: .trailing)
                 Text(title).font(.system(size: 12, weight: current ? .medium : .regular)).lineLimit(1).frame(width: max(20, proxy.size.width - max(90, min(180, proxy.size.width * 0.23)) - 202), alignment: .leading)
                 Text(origin).font(.system(size: 11)).foregroundStyle(palette.secondary).lineLimit(1).frame(width: max(90, min(180, proxy.size.width * 0.23)), alignment: .leading)
@@ -157,7 +167,7 @@ struct TrackTableRow: View {
                 Text(format).font(.system(size: 9, weight: .medium)).foregroundStyle(palette.tertiary).frame(width: 40, alignment: .trailing)
             }.padding(.horizontal, 10).frame(height: 32)
                 .background(selected ? palette.accent.opacity(0.12) : index.isMultiple(of: 2) ? palette.surface.opacity(0.35) : .clear, in: RoundedRectangle(cornerRadius: 5))
-                .overlay(alignment: .bottom) { Rectangle().fill(palette.border.opacity(0.45)).frame(height: 0.5).padding(.horizontal, 10) }
+                .overlay(alignment: .bottom) { Rectangle().fill(palette.border.opacity(0.45)).frame(height: 0.5).padding(.horizontal, 10).allowsHitTesting(false) }
         }.frame(height: 32).contentShape(Rectangle()).modifier(HoverHighlight())
     }
 }
@@ -243,5 +253,92 @@ final class InstrumentSliderCell: NSSliderCell {
         NSGraphicsContext.restoreGraphicsState()
         NSGradient(starting: .white.withAlphaComponent(isEnabled ? 1 : 0.35), ending: NSColor(calibratedWhite: 0.83, alpha: isEnabled ? 1 : 0.35))?.draw(in: path, angle: 90)
         NSColor.black.withAlphaComponent(0.12).setStroke(); path.lineWidth = 0.5; path.stroke()
+    }
+}
+
+/// Uses the native split view's saved divider position; never adds a hit-test overlay.
+struct SplitViewAutosave: NSViewRepresentable {
+    var enabled: Bool
+    func makeNSView(context: Context) -> Marker { Marker(enabled: enabled) }
+    func updateNSView(_ view: Marker, context: Context) { view.enabled = enabled; view.configure() }
+    final class Marker: NSView {
+        var enabled: Bool
+        private weak var configuredSplit: NSSplitView?
+        init(enabled: Bool) { self.enabled = enabled; super.init(frame: .zero) }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            DispatchQueue.main.async { [weak self] in self?.configure() }
+        }
+        func configure() {
+            guard window != nil else { return }
+            var ancestor = superview
+            while let view = ancestor {
+                if let split = view as? NSSplitView {
+                    guard configuredSplit !== split, split.bounds.width > 0 else { return }
+                    configuredSplit = split
+                    split.setPosition(196, ofDividerAt: 0)
+                    if enabled && split.autosaveName == nil { split.autosaveName = "LittleEars.MainSidebar" }
+                    return
+                }
+                ancestor = view.superview
+            }
+        }
+    }
+}
+
+/// Window-scoped transport shortcuts; text editing and sliders keep their native keys.
+struct PlaybackKeyboardShortcuts: NSViewRepresentable {
+    enum Command: Equatable {
+        case togglePlayback, previous, next, volumeUp, volumeDown
+        var allowsRepeat: Bool { self == .volumeUp || self == .volumeDown }
+    }
+    var action: (Command) -> Void
+    func makeNSView(context: Context) -> MonitorView { MonitorView(action: action) }
+    func updateNSView(_ view: MonitorView, context: Context) { view.action = action }
+    static func command(for event: NSEvent, responder: NSResponder?, hasSheet: Bool) -> Command? {
+        guard !hasSheet, event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else { return nil }
+        let command: Command
+        switch event.keyCode {
+        case 49: command = .togglePlayback
+        case 123: command = .previous
+        case 124: command = .next
+        case 125: command = .volumeDown
+        case 126: command = .volumeUp
+        default: return nil
+        }
+        // A field editor keeps cursor keys; space on a focused button still activates it.
+        var view = responder as? NSView
+        while let current = view {
+            if current is NSTextView || current is NSTextField || current is NSPopUpButton { return nil }
+            if command == .togglePlayback && current is NSButton { return nil }
+            if command != .togglePlayback && current is NSSlider { return nil }
+            view = current.superview
+        }
+        return command
+    }
+    static func shouldHandle(_ event: NSEvent, responder: NSResponder?, hasSheet: Bool) -> Bool {
+        command(for: event, responder: responder, hasSheet: hasSheet) != nil
+    }
+    final class MonitorView: NSView {
+        var action: (Command) -> Void
+        private var monitor: Any?
+        init(action: @escaping (Command) -> Void) { self.action = action; super.init(frame: .zero) }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window == nil { removeMonitor(); return }
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, let window = self.window, window.isKeyWindow, event.window === window,
+                      let command = PlaybackKeyboardShortcuts.command(for: event, responder: window.firstResponder, hasSheet: window.attachedSheet != nil) else { return event }
+                if !event.isARepeat || command.allowsRepeat { self.action(command) }
+                return nil
+            }
+        }
+        private func removeMonitor() { if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil } }
+        deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
     }
 }

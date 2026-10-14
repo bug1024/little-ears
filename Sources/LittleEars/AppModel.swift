@@ -213,7 +213,7 @@ final class AppModel: ObservableObject {
     @discardableResult
     func createPlaylist(name: String, trackIDs: [String]) async throws -> Playlist {
         let db = try playlistDatabase()
-        let playlist = Playlist(name: try validPlaylistName(name))
+        let playlist = Playlist(name: try validPlaylistName(name), position: (playlists.map(\.position).max() ?? -1) + 1)
         let entries = trackIDs.enumerated().map { PlaylistItem(playlistID: playlist.id, trackID: $0.element, position: $0.offset) }
         savingPlaylists = true; defer { savingPlaylists = false }
         try await db.savePlaylist(playlist, items: entries)
@@ -252,6 +252,16 @@ final class AppModel: ObservableObject {
     }
     func renamePlaylist(_ playlist: Playlist, name: String) async throws {
         try await persistPlaylist(playlist, entries: items(in: playlist.id), name: validPlaylistName(name))
+    }
+    func movePlaylists(from: IndexSet, to: Int) async throws {
+        guard !from.isEmpty, from.allSatisfy({ playlists.indices.contains($0) }), (0...playlists.count).contains(to) else { return }
+        let db = try playlistDatabase()
+        var ordered = playlists
+        ordered.move(fromOffsets: from, toOffset: to)
+        ordered = ordered.enumerated().map { index, playlist in var copy = playlist; copy.position = index; return copy }
+        savingPlaylists = true; defer { savingPlaylists = false }
+        try await db.savePlaylistOrder(ordered.map(\.id))
+        playlists = ordered
     }
     func deletePlaylist(_ playlist: Playlist) async throws {
         let db = try playlistDatabase()
@@ -321,6 +331,19 @@ final class AppModel: ObservableObject {
         if position > 3 { seek(0); return }
         guard let index = queue.firstIndex(where: { $0.id == currentID }), index > 0 else { seek(0); return }
         jump(queue[index - 1])
+    }
+    /// Direct previous-track command, independent of the current elapsed time.
+    func previousTrack() {
+        guard let index = queue.firstIndex(where: { $0.id == currentID }) else { return }
+        if index > 0 { jump(queue[index - 1]) }
+        else if mode == .all, let last = queue.last { jump(last) }
+        else { seek(0) }
+    }
+    func adjustVolume(by delta: Float) {
+        let adjusted = min(1, max(0, volume + delta))
+        guard adjusted != volume else { return }
+        volume = adjusted
+        checkpoint()
     }
     func next() {
         guard let index = queue.firstIndex(where: { $0.id == currentID }) else { return }

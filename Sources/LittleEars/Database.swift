@@ -46,6 +46,13 @@ actor LibraryDatabase {
                 t.column("position", .integer).notNull()
             }
         }
+        migrations.registerMigration("v4-playlist-order") { db in
+            try db.alter(table: "playlists") { $0.add(column: "position", .integer).notNull().defaults(to: 0) }
+            let ids = try String.fetchAll(db, sql: "SELECT id FROM playlists ORDER BY createdAt, id")
+            for (position, id) in ids.enumerated() {
+                try db.execute(sql: "UPDATE playlists SET position = ? WHERE id = ?", arguments: [position, id])
+            }
+        }
         try migrations.migrate(db)
         try db.write { db in
             try db.execute(sql: "UPDATE sessions SET endedAt = COALESCE(checkpointAt, startedAt), endReason = 'interrupted' WHERE endedAt IS NULL")
@@ -99,7 +106,7 @@ actor LibraryDatabase {
     }
     func loadPlaylists() throws -> ([Playlist], [PlaylistItem]) {
         try db.read { db in
-            (try Playlist.order(Column("createdAt")).fetchAll(db),
+            (try Playlist.order(Column("position"), Column("createdAt"), Column("id")).fetchAll(db),
              try PlaylistItem.order(Column("position")).fetchAll(db))
         }
     }
@@ -110,6 +117,13 @@ actor LibraryDatabase {
             for (index, var item) in items.enumerated() {
                 item.playlistID = playlist.id; item.position = index
                 try item.insert(db)
+            }
+        }
+    }
+    func savePlaylistOrder(_ ids: [String]) throws {
+        try db.write { db in
+            for (position, id) in ids.enumerated() {
+                try db.execute(sql: "UPDATE playlists SET position = ? WHERE id = ?", arguments: [position, id])
             }
         }
     }
