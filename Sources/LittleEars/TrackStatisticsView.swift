@@ -22,7 +22,7 @@ struct TrackStatisticsView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(target.track?.title ?? "历史音频").font(.system(size: 16, weight: .semibold)).lineLimit(2)
+                    Text(target.track.map { model.displayName($0) } ?? "历史音频").font(.system(size: 16, weight: .semibold)).lineLimit(2)
                     Text(target.track.map { $0.folder.isEmpty ? "本地音频" : $0.folder } ?? "目录信息不可用")
                         .font(.system(size: 11)).foregroundStyle(palette.secondary).lineLimit(1)
                     Text(target.track.map { "\(timeLabel($0.duration)) · \($0.format)\($0.available ? "" : " · 文件不可用")" } ?? "音频信息不可用")

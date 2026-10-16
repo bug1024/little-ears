@@ -62,7 +62,7 @@ struct AquariumImmersiveView: View {
                     VStack(spacing: 4) {
                         HStack(spacing: 14) {
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(model.currentTrack?.title ?? "水族箱").font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                                Text(model.currentTrack.map { model.displayName($0) } ?? "水族箱").font(.system(size: 14, weight: .semibold)).lineLimit(1)
                                 Text(model.currentTrack?.folder ?? "静静看一会儿鱼，也很好").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                             }.frame(maxWidth: .infinity, alignment: .leading)
                             HStack(spacing: 14) {

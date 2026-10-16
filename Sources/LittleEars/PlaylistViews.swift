@@ -199,7 +199,7 @@ struct PlaylistsView: View {
     }
     private func row(_ item: PlaylistItem, index: Int) -> some View {
         let track = model.tracks.first { $0.id == item.trackID }
-        return TrackTableRow(palette: palette, index: index, title: track?.title ?? "音频不可用",
+        return TrackTableRow(palette: palette, index: index, title: track.map { model.displayName($0) } ?? "音频不可用",
                              origin: track.map { $0.available ? ($0.folder.isEmpty ? "本地音频" : $0.folder) : "文件不可用" } ?? "记录不可用",
                              duration: track?.duration ?? 0, format: track?.format ?? "—", selected: selection.contains(item.id), draggable: true, dragItemID: item.id)
     }

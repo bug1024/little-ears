@@ -8,6 +8,11 @@ struct LibrarySource: Codable, Identifiable, FetchableRecord, PersistableRecord,
     var bookmark: Data
     var name: String
 }
+enum TrackNameMode: String, CaseIterable {
+    case metadata, filename
+    var title: String { self == .metadata ? "元数据标题" : "文件名称" }
+}
+
 struct Track: Codable, Identifiable, FetchableRecord, PersistableRecord, Sendable, Hashable {
     static let databaseTableName = "tracks"
     var id: String
@@ -20,6 +25,15 @@ struct Track: Codable, Identifiable, FetchableRecord, PersistableRecord, Sendabl
     var fileSize: Int64
     var available: Bool
     var folder: String { (relativePath as NSString).deletingLastPathComponent }
+    var filename: String { (relativePath as NSString).lastPathComponent }
+    func displayName(_ mode: TrackNameMode) -> String {
+        let stem = (filename as NSString).deletingPathExtension
+        if mode == .filename { return stem.isEmpty ? filename : stem }
+        return title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? (stem.isEmpty ? filename : stem) : title
+    }
+    func matchesName(_ query: String) -> Bool {
+        query.isEmpty || title.localizedCaseInsensitiveContains(query) || filename.localizedCaseInsensitiveContains(query)
+    }
 }
 struct QueueItem: Codable, Identifiable, Sendable, Hashable {
     var id = UUID().uuidString

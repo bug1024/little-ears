@@ -33,6 +33,16 @@ final class AppModel: ObservableObject {
     @Published var selectedFolder: String? { didSet { if selectedFolder != oldValue { cachedVisibleTracks = nil } } }
     @Published var search = "" { didSet { if search != oldValue { cachedVisibleTracks = nil } } }
     @Published var includeChildren = false { didSet { if includeChildren != oldValue { cachedVisibleTracks = nil } } }
+    @Published var trackNameMode: TrackNameMode = .metadata {
+        didSet {
+            guard trackNameMode != oldValue else { return }
+            cachedVisibleTracks = nil
+            preferences.set(trackNameMode.rawValue, forKey: "trackNameMode")
+            updateNowPlaying()
+        }
+    }
+    private let preferences: UserDefaults
+    func displayName(_ track: Track) -> String { track.displayName(trackNameMode) }
     @Published var sortByDuration = false { didSet { if sortByDuration != oldValue { cachedVisibleTracks = nil } } }
     let sleepTimer: SleepTimerManager
     @Published var trackDetailsTarget: TrackDetailsTarget?
@@ -73,10 +83,11 @@ final class AppModel: ObservableObject {
             let folderOK = sourceID.map { id in
                 track.sourceID == id && (track.folder == folder || (includeChildren && (folder.isEmpty || track.folder.hasPrefix(folder + "/"))))
             } ?? true
-            return folderOK && (search.isEmpty || track.title.localizedCaseInsensitiveContains(search))
+            return folderOK && track.matchesName(search)
         }.sorted {
             if sortByDuration, $0.duration != $1.duration { return $0.duration < $1.duration }
-            let order = $0.title.localizedStandardCompare($1.title)
+            let nameMode: TrackNameMode = sortByDuration ? .metadata : trackNameMode
+            let order = $0.displayName(nameMode).localizedStandardCompare($1.displayName(nameMode))
             return order == .orderedSame ? $0.relativePath < $1.relativePath : order == .orderedAscending
         }
         cachedVisibleTracks = result
@@ -88,8 +99,10 @@ final class AppModel: ObservableObject {
         return p.count > 1 && !p[1].isEmpty ? (p[1] as NSString).lastPathComponent : sources.first { $0.id == p[0] }?.name ?? "音乐库"
     }
     var snapshot: PlayerSnapshot { PlayerSnapshot(queue: queue, currentID: currentID, position: position, mode: mode.rawValue, volume: volume) }
-    init(databasePath: String? = nil, remoteControls: Bool = true, sleepTimer: SleepTimerManager? = nil, historySnapshotPath: String? = nil) {
+    init(databasePath: String? = nil, remoteControls: Bool = true, sleepTimer: SleepTimerManager? = nil, historySnapshotPath: String? = nil, preferences: UserDefaults = .standard) {
+        self.preferences = preferences
         self.sleepTimer = sleepTimer ?? SleepTimerManager()
+        self.trackNameMode = TrackNameMode(rawValue: preferences.string(forKey: "trackNameMode") ?? "") ?? .metadata
         let display = spectrumDisplay
         engine.spectrum.setCallback { [weak self, weak display] frame in
             Task { @MainActor in
@@ -314,7 +327,7 @@ final class AppModel: ObservableObject {
             if session == nil { session = ListenSession(id: UUID().uuidString, trackID: track.id, startedAt: Date()); coverage = Coverage() }
             lastTick = ProcessInfo.processInfo.systemUptime; lastPosition = engine.position
             try engine.play(); isPlaying = true; updateNowPlaying(); checkpoint()
-        } catch { skipUnavailable(startingAt: currentID, message: "无法播放「\(track.title)」：\(error.localizedDescription)") }
+        } catch { skipUnavailable(startingAt: currentID, message: "无法播放「\(displayName(track))」：\(error.localizedDescription)") }
     }
     private func skipUnavailable(startingAt: String?, message: String) {
         finishSession(reason: "unavailable", completed: false); engine.stop(); loadedTrackID = nil; isPlaying = false
@@ -478,7 +491,7 @@ final class AppModel: ObservableObject {
         synchronizeSpectrum()
         previewSpectrumIfNeeded()
         guard let track = currentTrack else { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil; return }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle: track.title,
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle: displayName(track),
             MPMediaItemPropertyPlaybackDuration: track.duration, MPNowPlayingInfoPropertyElapsedPlaybackTime: position,
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0]
         MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused

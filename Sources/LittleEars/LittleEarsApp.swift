@@ -48,7 +48,7 @@ struct LittleEarsApp: App {
                     Button("切换播放模式", action: model.cycleMode).keyboardShortcut("r")
                 }
             }
-        Settings { SettingsView() }
+        Settings { SettingsView().environmentObject(model) }
     }
 }
 struct MainScene: View {

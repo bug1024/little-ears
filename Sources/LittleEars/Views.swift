@@ -214,7 +214,7 @@ struct LibraryView: View {
                 TableColumnHeader(palette: palette).padding(.horizontal, 20)
                 List(selection: $selection) {
                     ForEach(Array(visible.enumerated()), id: \.element.id) { index, track in
-                        TrackTableRow(palette: palette, index: index, title: track.title,
+                        TrackTableRow(palette: palette, index: index, title: model.displayName(track),
                                       origin: track.available ? (track.folder.isEmpty ? model.sources.first { $0.id == track.sourceID }?.name ?? "" : track.folder) : "文件不可用",
                                       duration: track.duration, format: track.format, current: model.currentTrack?.id == track.id, selected: selection.contains(track.id))
                             .tag(track.id).listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(Color.clear)
@@ -282,7 +282,7 @@ struct PlayerBar: View {
                     HStack(spacing: 9) {
                         Image(systemName: "music.note").font(.system(size: 14)).foregroundStyle(palette.secondary).frame(width: 32, height: 32).modifier(MaterialSurface(palette: palette, radius: 7, inset: true))
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(model.currentTrack?.title ?? "未选择音频").font(.system(size: 12, weight: .medium)).lineLimit(1)
+                            Text(model.currentTrack.map { model.displayName($0) } ?? "未选择音频").font(.system(size: 12, weight: .medium)).lineLimit(1)
                             Text(model.currentTrack.map { $0.folder.isEmpty ? "本地音频" : ($0.folder as NSString).lastPathComponent } ?? "从音乐库开始播放")
                                 .font(.system(size: 10)).foregroundStyle(palette.secondary).lineLimit(1)
                         }
@@ -428,7 +428,7 @@ struct NowPlayingView: View {
                                 Circle().fill(playbackColor).frame(width: 4, height: 4)
                                 Text(model.isPlaying ? "正在播放" : "当前音频").font(.system(size: 10, weight: .medium)).foregroundStyle(playbackColor)
                             }
-                            Text(model.currentTrack?.title ?? "未选择音频").font(.system(size: 26, weight: .semibold)).lineLimit(2)
+                            Text(model.currentTrack.map { model.displayName($0) } ?? "未选择音频").font(.system(size: 26, weight: .semibold)).lineLimit(2)
                             Text(model.currentTrack?.folder ?? "从音乐库选择音频开始播放").font(.system(size: 11)).foregroundStyle(palette.secondary).lineLimit(1)
                         }
                         Spacer(minLength: 0)
@@ -437,7 +437,9 @@ struct NowPlayingView: View {
                                 .buttonStyle(.plain).help("音频信息").accessibilityLabel("音频信息")
                                 .popover(isPresented: $showingInfo) {
                                     VStack(alignment: .leading, spacing: 10) {
-                                        Text(track.title).font(.system(size: 13, weight: .semibold)).lineLimit(2)
+                                        Text(model.displayName(track)).font(.system(size: 13, weight: .semibold)).lineLimit(2)
+                                        LabeledContent("标题", value: track.title)
+                                        LabeledContent("文件名", value: track.filename).textSelection(.enabled)
                                         LabeledContent("时长", value: timeLabel(track.duration))
                                         LabeledContent("文件大小", value: ByteCountFormatter.string(fromByteCount: track.fileSize, countStyle: .file))
                                         LabeledContent("队列位置", value: currentIndex.map { "\($0 + 1) / \(model.queue.count)" } ?? "—")
@@ -474,7 +476,7 @@ struct NowPlayingView: View {
                                 .foregroundStyle(item.id == model.currentID ? playbackColor : palette.tertiary)
                                 .frame(width: 19)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(track?.title ?? "音频不可用").font(.system(size: 11, weight: item.id == model.currentID ? .medium : .regular)).lineLimit(1)
+                                Text(track.map { model.displayName($0) } ?? "音频不可用").font(.system(size: 11, weight: item.id == model.currentID ? .medium : .regular)).lineLimit(1)
                                 Text(track.map { ($0.folder as NSString).lastPathComponent } ?? "文件不可用").font(.system(size: 10)).foregroundStyle(palette.secondary).lineLimit(1)
                             }
                             Spacer(minLength: 0)
@@ -502,7 +504,7 @@ struct NowPlayingView: View {
                                     RoundedRectangle(cornerRadius: 1).fill(playbackColor.opacity(0.8)).frame(width: 2).padding(.vertical, 12).allowsHitTesting(false)
                                 }
                             }
-                            .help(track.map { "\($0.title) · \($0.folder)" } ?? "音频不可用")
+                            .help(track.map { "\(model.displayName($0)) · \($0.folder)" } ?? "音频不可用")
                             .contentShape(Rectangle()).modifier(HoverHighlight()).onTapGesture(count: 2) { model.jump(item) }
                             .contextMenu { Button("从这里播放") { model.jump(item) } }
                             .onDrag { draggedID = item.id; return NSItemProvider(object: item.id as NSString) }
@@ -559,7 +561,7 @@ struct StatisticsView: View {
                             Button { model.showTrackStatistics(item.trackID) } label: {
                               HStack {
                                 Text(String(format: "%02d", index + 1)).font(.system(size: 10)).monospacedDigit().foregroundStyle(palette.tertiary).frame(width: 26, alignment: .leading)
-                                Text(model.tracks.first { $0.id == item.trackID }?.title ?? "历史音频").font(.system(size: 12)).lineLimit(1)
+                                Text(model.tracks.first { $0.id == item.trackID }.map { model.displayName($0) } ?? "历史音频").font(.system(size: 12)).lineLimit(1)
                                 Spacer()
                                 Text("\(item.completions)").frame(width: 80, alignment: .trailing)
                                 Text(listeningLabel(item.seconds)).frame(width: 125, alignment: .trailing)
@@ -580,6 +582,7 @@ struct StatisticsView: View {
     }
 }
 struct SettingsView: View {
+    @EnvironmentObject var model: AppModel
     @Environment(\.colorScheme) var scheme
     @AppStorage("appearance") var appearance = "system"
     @AppStorage("accent") var accent = "blue"
@@ -616,10 +619,22 @@ struct SettingsView: View {
                     }
                 }
             }.padding(16).modifier(PanelStyle(palette: palette))
+            VStack(alignment: .leading, spacing: 10) {
+                Text("音乐库").font(.system(size: 11, weight: .semibold)).foregroundStyle(palette.secondary)
+                HStack {
+                    Text("曲目名称显示")
+                    Spacer()
+                    Picker("曲目名称显示", selection: $model.trackNameMode) {
+                        ForEach(TrackNameMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }.labelsHidden().frame(width: 190)
+                }
+                Text("名称排序跟随显示模式；播放列表与当前队列的顺序保持不变。搜索同时匹配标题和文件名。")
+                    .font(.system(size: 10)).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            }.padding(16).modifier(PanelStyle(palette: palette))
             Text("引用本地文件，不复制或修改原始音频。播放队列与统计自动保存。")
                 .font(.system(size: 11)).foregroundStyle(palette.secondary).lineSpacing(3)
             Spacer(minLength: 0)
-        }.font(.system(size: 12)).foregroundStyle(palette.text).padding(22).frame(width: 490, height: 300)
+        }.font(.system(size: 12)).foregroundStyle(palette.text).padding(22).frame(width: 490, height: 410)
             .background(LinearGradient(colors: [palette.sidebar, palette.background], startPoint: .topLeading, endPoint: .bottomTrailing))
             .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light).tint(palette.accent)
     }

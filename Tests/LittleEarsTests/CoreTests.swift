@@ -7,6 +7,47 @@ import Combine
 
 final class CoreTests: XCTestCase {
     @MainActor
+    func testTrackNameModeSortSearchPersistenceAndManualOrder() async throws {
+        let suite = "LittleEars.TrackNameTests.\(UUID().uuidString)"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let model = AppModel(databasePath: ":memory:", remoteControls: false, preferences: preferences)
+        for _ in 0..<50 { if model.ready { break }; try await Task.sleep(for: .milliseconds(20)) }
+        func track(_ id: String, _ path: String, _ title: String) -> Track {
+            Track(id: id, sourceID: "local", relativePath: path, identity: id, title: title, duration: 20, format: "FLAC", fileSize: 100, available: true)
+        }
+        let ten = track("ten", "album/10 - Custom.flac", "Alpha")
+        let two = track("two", "album/2 - Renamed.flac", "Zulu")
+        XCTAssertEqual(model.trackNameMode, .metadata)
+        model.tracks = [two, ten]
+        XCTAssertEqual(model.visibleTracks.map(\.id), ["ten", "two"])
+        model.queue = [QueueItem(trackID: "ten"), QueueItem(trackID: "two")]
+        model.currentID = model.queue[0].id
+        model.playlistItems = [PlaylistItem(playlistID: "p", trackID: "ten", position: 0), PlaylistItem(playlistID: "p", trackID: "two", position: 1)]
+        let queue = model.queue, items = model.playlistItems
+        model.trackNameMode = .filename
+        XCTAssertEqual(model.visibleTracks.map(\.id), ["two", "ten"])
+        XCTAssertEqual(model.displayName(two), "2 - Renamed")
+        XCTAssertEqual(model.queue, queue)
+        XCTAssertEqual(model.playlistItems, items)
+        XCTAssertEqual(preferences.string(forKey: "trackNameMode"), "filename")
+        model.search = "ALPHA"
+        XCTAssertEqual(model.visibleTracks.map(\.id), ["ten"])
+        model.trackNameMode = .metadata; model.search = "RENAMED.FLAC"
+        XCTAssertEqual(model.visibleTracks.map(\.id), ["two"])
+        model.search = ""; model.sortByDuration = true
+        let durationOrder = model.visibleTracks.map(\.id)
+        model.trackNameMode = .filename
+        XCTAssertEqual(model.visibleTracks.map(\.id), durationOrder)
+        XCTAssertEqual(track("blank", "nested/03 - Story.MP3", "  ").displayName(.metadata), "03 - Story")
+        XCTAssertEqual(track("dots", "nested/a.b.flac", "A").displayName(.filename), "a.b")
+        let restored = AppModel(databasePath: ":memory:", remoteControls: false, preferences: preferences)
+        XCTAssertEqual(restored.trackNameMode, .filename)
+        await restored.shutdown()
+        await model.shutdown()
+    }
+
+    @MainActor
     func testLibraryProjectionInvalidatesForFiltersSortAndTrackChanges() async throws {
         let model = AppModel(databasePath: ":memory:", remoteControls: false)
         for _ in 0..<50 { if model.ready { break }; try await Task.sleep(for: .milliseconds(20)) }

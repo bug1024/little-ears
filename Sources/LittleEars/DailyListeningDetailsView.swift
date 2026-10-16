@@ -36,7 +36,7 @@ struct DailyListeningDetailsView: View {
                         Button { selectedTrack = TrackDetailsTarget(id: entry.id, track: entry.track) } label: {
                             HStack(spacing: 10) {
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(entry.track?.title ?? "历史音频").font(.system(size: 12)).lineLimit(1)
+                                    Text(entry.track.map { model.displayName($0) } ?? "历史音频").font(.system(size: 12)).lineLimit(1)
                                     Text(entry.track.map { $0.folder.isEmpty ? "本地音频" : $0.folder } ?? "目录信息不可用").font(.system(size: 10)).foregroundStyle(palette.secondary).lineLimit(1)
                                 }.frame(maxWidth: .infinity, alignment: .leading)
                                 Text(timeLabel(entry.seconds)).font(.system(size: 11)).monospacedDigit().frame(width: 84, alignment: .trailing)
