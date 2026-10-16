@@ -310,6 +310,7 @@ struct PlayerBar: View {
     }
 }
 struct SpectrumPlot: View {
+    var preferences = SpectrumPreferences()
     @ObservedObject var display: SpectrumDisplay
     let palette: Palette
     let playing: Bool
@@ -320,11 +321,11 @@ struct SpectrumPlot: View {
             let step = size.width / CGFloat(max(1, display.frame.levels.count))
             var bars = Path()
             for (index, level) in display.frame.levels.enumerated() {
-                let height = max(1, CGFloat(level) * plotHeight)
+                let height = max(1, CGFloat(min(1, Double(level) * preferences.amplitude)) * plotHeight)
                 let rect = CGRect(x: CGFloat(index) * step + 1.2, y: baseline - height, width: max(1, step - 2.4), height: height)
                 bars.addRoundedRect(in: rect, cornerSize: CGSize(width: 2, height: 2))
             }
-            if palette.dark {
+            if palette.dark && preferences.glow {
                 var light = context
                 light.addFilter(.blur(radius: 8))
                 light.fill(bars, with: .color(palette.accent.opacity(playing ? 0.16 : 0.08)))
@@ -332,10 +333,10 @@ struct SpectrumPlot: View {
             context.fill(bars, with: .linearGradient(Gradient(colors: [palette.accent.opacity(palette.dark ? 0.95 : 0.9), palette.accent.opacity(palette.dark ? 0.45 : 0.55)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: baseline)))
             for (index, level) in display.frame.levels.enumerated() {
                 let x = CGFloat(index) * step + 1.2
-                let reflection = CGRect(x: x, y: baseline + 3, width: max(1, step - 2.4), height: CGFloat(level) * plotHeight * 0.14)
-                context.fill(Path(reflection), with: .linearGradient(Gradient(colors: [palette.accent.opacity(palette.dark ? 0.18 : 0.06), .clear]), startPoint: CGPoint(x: x, y: baseline), endPoint: CGPoint(x: x, y: reflection.maxY)))
-                if index < display.frame.peaks.count {
-                    let peak = CGFloat(display.frame.peaks[index]) * plotHeight
+                let reflection = CGRect(x: x, y: baseline + 3, width: max(1, step - 2.4), height: CGFloat(min(1, Double(level) * preferences.amplitude)) * plotHeight * 0.14)
+                if preferences.reflection { context.fill(Path(reflection), with: .linearGradient(Gradient(colors: [palette.accent.opacity(palette.dark ? 0.18 : 0.06), .clear]), startPoint: CGPoint(x: x, y: baseline), endPoint: CGPoint(x: x, y: reflection.maxY))) }
+                if preferences.peaks && index < display.frame.peaks.count {
+                    let peak = CGFloat(min(1, Double(display.frame.peaks[index]) * preferences.amplitude)) * plotHeight
                     if peak > 3 {
                         context.fill(Path(CGRect(x: x, y: baseline - peak - 3, width: max(1, step - 2.4), height: 1)), with: .color(palette.accent.opacity(0.7)))
                     }
@@ -350,6 +351,8 @@ struct NowPlayingView: View {
     @EnvironmentObject var model: AppModel
     @AppStorage("spectrumEnabled") var spectrumEnabled = true
     @AppStorage("playingVisualization") var visualization = "spectrum"
+    var spectrumPreferences = SpectrumPreferences()
+    @State private var showingSpectrumSettings = false
     @State private var showingAquariumSettings = false
     let palette: Palette
     @State private var draggedID: String?
@@ -388,6 +391,9 @@ struct NowPlayingView: View {
                                 .help("沉浸全屏 · Esc 退出").accessibilityLabel("水族箱沉浸全屏")
                             Button { showingAquariumSettings = true } label: { Image(systemName: "slider.horizontal.3") }
                                 .help("水族箱场景配置").accessibilityLabel("水族箱场景配置")
+                        } else {
+                            Button { showingSpectrumSettings = true } label: { Image(systemName: "slider.horizontal.3") }
+                                .help("频谱配置").accessibilityLabel("频谱配置")
                         }
                     }.padding(.bottom, 8)
                     if visualization == "aquarium" {
@@ -400,7 +406,13 @@ struct NowPlayingView: View {
                             Button("前往音乐库") { model.page = "library" }
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if spectrumEnabled {
-                        SpectrumPlot(display: model.spectrumDisplay, palette: palette, playing: model.isPlaying)
+                        Group {
+                            if spectrumPreferences.style == "fluid" {
+                                FluidSpectrumPlot(display: model.spectrumDisplay, palette: palette, amplitude: spectrumPreferences.amplitude, layers: spectrumPreferences.layerCount, glow: spectrumPreferences.glow)
+                            } else {
+                                SpectrumPlot(display: model.spectrumDisplay, palette: palette, playing: model.isPlaying)
+                            }
+                        }
                             .frame(minHeight: 160, maxHeight: .infinity)
                             .background { RadialGradient(colors: [palette.accent.opacity(palette.dark ? 0.055 : 0.025), .clear], center: .center, startRadius: 0, endRadius: 260) }
                     } else {
@@ -440,6 +452,7 @@ struct NowPlayingView: View {
         }.onAppear { model.setSpectrumVisible(visualization == "spectrum") }
             .onDisappear { model.setSpectrumVisible(false) }
             .onChange(of: visualization) { _, value in model.setSpectrumVisible(value == "spectrum") }
+            .sheet(isPresented: $showingSpectrumSettings) { SpectrumSettingsPanel() }
             .sheet(isPresented: $showingAquariumSettings) { AquariumSettingsPanel(controller: model.aquarium) }
     }
     private var queuePanel: some View {

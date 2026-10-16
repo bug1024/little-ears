@@ -10,6 +10,21 @@ private final class SpectrumCapture: @unchecked Sendable {
     var count: Int { lock.lock(); defer { lock.unlock() }; return frames.count }
 }
 final class SpectrumTests: XCTestCase {
+    func testFluidWaveUsesAudioEnergyAndFreezesAtSameFrame() {
+        let silent = FluidSpectrumGeometry(levels: Array(repeating: 0, count: 64))
+        let bass = FluidSpectrumGeometry(levels: (0..<64).map { $0 < 22 ? 0.8 : 0.1 })
+        let treble = FluidSpectrumGeometry(levels: (0..<64).map { $0 > 41 ? 0.8 : 0.1 })
+        let positions = (0...100).map { Double($0) / 100 }
+        XCTAssertTrue(positions.allSatisfy { silent.displacement(x: $0, strand: 0.5, time: 3) == 0 })
+        let first = positions.map { bass.displacement(x: $0, strand: 0.5, time: 3) }
+        XCTAssertEqual(first, positions.map { bass.displacement(x: $0, strand: 0.5, time: 3) })
+        XCTAssertNotEqual(first, positions.map { bass.displacement(x: $0, strand: 0.5, time: 4) })
+        XCTAssertNotEqual(first, positions.map { treble.displacement(x: $0, strand: 0.5, time: 3) })
+        XCTAssertTrue(first.allSatisfy { $0.isFinite && abs($0) < 1.2 })
+        let invalid = FluidSpectrumGeometry(levels: [.nan, .infinity, -2])
+        XCTAssertEqual(invalid.displacement(x: 0.5, strand: 0, time: 1), 0)
+    }
+
     func testFFTTracksActualToneAtDifferentSampleRates() {
         for sampleRate in [44100.0, 48000.0] {
             for frequency in [220.0, 1000.0, 6000.0] {

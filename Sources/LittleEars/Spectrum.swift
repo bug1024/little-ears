@@ -7,6 +7,7 @@ struct SpectrumFrame: Sendable {
     var levels: [Float]
     var peaks: [Float]
     var sampleRate: Double
+    var motionTime: Double = 0
     var revision = 0
     var epoch = 0
     var isReset = false
@@ -21,6 +22,7 @@ final class SpectrumDisplay: ObservableObject {
 final class SpectrumProcessor {
     static let size = 4096
     static let bands = 64
+    private var motionTime: Double = 0
     private let setup: FFTSetup
     private var window = [Float](repeating: 0, count: size)
     private var windowed = [Float](repeating: 0, count: size)
@@ -34,7 +36,7 @@ final class SpectrumProcessor {
         vDSP_hann_window(&window, vDSP_Length(Self.size), Int32(vDSP_HANN_NORM))
     }
     deinit { vDSP_destroy_fftsetup(setup) }
-    func reset() { levels = Array(repeating: 0, count: Self.bands); peaks = levels }
+    func reset() { levels = Array(repeating: 0, count: Self.bands); peaks = levels; motionTime = 0 }
     static func frequencyRange(band: Int, sampleRate: Double) -> ClosedRange<Double> {
         let upper = min(16000, sampleRate / 2)
         let ratio = upper / 30
@@ -68,7 +70,8 @@ final class SpectrumProcessor {
             levels[band] += (target - levels[band]) * coefficient
             peaks[band] = max(levels[band], peaks[band] - 0.012)
         }
-        return SpectrumFrame(levels: levels, peaks: peaks, sampleRate: sampleRate)
+        motionTime += 1.0 / 30.0
+        return SpectrumFrame(levels: levels, peaks: peaks, sampleRate: sampleRate, motionTime: motionTime)
     }
 }
 
@@ -192,5 +195,123 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         frame.revision = token; frame.epoch = capturedEpoch
         lock.lock(); let valid = active && revision == token; lock.unlock()
         if valid { callback?(frame) }
+    }
+}
+
+// Shared preferences keep the playback panel and its configuration sheet in sync.
+struct SpectrumPreferences: DynamicProperty {
+    @AppStorage("spectrumStyle") var style = "bars"
+    @AppStorage("spectrumGain") var gain = 1.0
+    @AppStorage("spectrumGlow") var glow = true
+    @AppStorage("spectrumReflection") var reflection = true
+    @AppStorage("spectrumPeaks") var peaks = true
+    @AppStorage("spectrumLayers") var layers = 20
+    var amplitude: Double { gain.isFinite ? min(1.5, max(0.6, gain)) : 1 }
+    var layerCount: Int { min(28, max(12, layers)) }
+    func reset() {
+        style = "bars"; gain = 1; glow = true; reflection = true; peaks = true; layers = 20
+    }
+}
+
+/// FFT-driven ribbon geometry. Silence collapses every strand onto the center;
+/// time advances only when another PCM window is analyzed, so pause is static.
+struct FluidSpectrumGeometry {
+    let safe: [Double]
+    let energy: Double
+    let bass: Double
+    let treble: Double
+    init(levels: [Float]) {
+        safe = levels.map { $0.isFinite ? Double(min(1, max(0, $0))) : 0 }
+        energy = pow(sqrt(safe.reduce(0) { $0 + $1 * $1 } / Double(max(1, safe.count))), 0.65)
+        let split = max(1, safe.count / 3)
+        bass = safe.prefix(split).reduce(0, +) / Double(split)
+        treble = safe.suffix(split).reduce(0, +) / Double(split)
+    }
+    func displacement(x: Double, strand: Double, time: Double) -> Double {
+        guard !safe.isEmpty else { return 0 }
+        let position = min(Double(safe.count - 1), max(0, x * Double(safe.count - 1)))
+        let index = Int(position), next = min(safe.count - 1, index + 1)
+        func average(_ center: Int) -> Double {
+            let low = max(0, center - 3), high = min(safe.count - 1, center + 3)
+            return safe[low...high].reduce(0, +) / Double(high - low + 1)
+        }
+        let fraction = position - Double(index)
+        let local = average(index) * (1 - fraction) + average(next) * fraction
+        let a = sin(x * .pi * (2.6 + bass) - time * 1.4 + strand * 1.1)
+        let b = sin(x * .pi * 5.1 + time * 0.8 + strand * 1.6)
+        let c = sin(x * .pi * 8.0 - time * 0.55 + strand * 0.4)
+        let envelope = 0.45 + 0.55 * sin(min(1, max(0, x)) * .pi)
+        return energy * envelope * ((a * 0.62 + b * 0.28 + c * treble * 0.14) * (0.65 + local * 0.35) + strand * b * 0.42)
+    }
+}
+
+struct FluidSpectrumPlot: View {
+    @ObservedObject var display: SpectrumDisplay
+    let palette: Palette
+    let amplitude: Double
+    let layers: Int
+    let glow: Bool
+    var body: some View {
+        Canvas { context, size in
+            let frame = display.frame
+            let geometry = FluidSpectrumGeometry(levels: frame.levels)
+            let steps = max(96, min(240, Int(size.width / 4)))
+            for layer in 0..<layers {
+                let strand = Double(layer) / Double(max(1, layers - 1)) * 2 - 1
+                var path = Path()
+                for step in 0...steps {
+                    let x = Double(step) / Double(steps)
+                    let y = geometry.displacement(x: x, strand: strand, time: frame.motionTime)
+                    let point = CGPoint(x: x * size.width, y: size.height * 0.48 - y * size.height * 0.42 * amplitude)
+                    if step == 0 { path.move(to: point) } else { path.addLine(to: point) }
+                }
+                let central = 1 - abs(strand)
+                let color = palette.accent.opacity((palette.dark ? 0.30 : 0.16) + central * (palette.dark ? 0.50 : 0.40))
+                if glow && layer % 4 == 0 {
+                    var halo = context
+                    halo.addFilter(.blur(radius: 4))
+                    halo.stroke(path, with: .color(palette.accent.opacity(palette.dark ? 0.28 : 0.08)), lineWidth: 3)
+                }
+                context.stroke(path, with: .linearGradient(Gradient(colors: [color.opacity(0.45), color, color.opacity(0.65), color, color.opacity(0.45)]), startPoint: .zero, endPoint: CGPoint(x: size.width, y: 0)), lineWidth: 0.8 + central * 0.35)
+            }
+        }.accessibilityLabel("流体声波").accessibilityValue("由真实音频频谱驱动")
+    }
+}
+
+struct SpectrumSettingsPanel: View {
+    @Environment(\.dismiss) private var dismiss
+    var preferences = SpectrumPreferences()
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack { Text("频谱配置").font(.title3.weight(.semibold)); Spacer() }.padding(20)
+            Divider()
+            Form {
+                Picker("显示形式", selection: preferences.$style) {
+                    Text("经典柱状图").tag("bars")
+                    Text("流体声波").tag("fluid")
+                }.pickerStyle(.segmented)
+                LabeledContent("动态幅度") {
+                    Slider(value: preferences.$gain, in: 0.6...1.5, step: 0.1).accessibilityLabel("动态幅度")
+                    Text(preferences.amplitude, format: .number.precision(.fractionLength(1))).monospacedDigit().frame(width: 28)
+                }
+                Toggle("柔光", isOn: preferences.$glow)
+                if preferences.style == "fluid" {
+                    Picker("声波层数", selection: preferences.$layers) {
+                        Text("简洁 · 12").tag(12); Text("标准 · 20").tag(20); Text("丰富 · 28").tag(28)
+                    }
+                } else {
+                    Toggle("峰值标记", isOn: preferences.$peaks)
+                    Toggle("底部倒影", isOn: preferences.$reflection)
+                }
+                Text("两种形式均响应真实音频数据。动态幅度只影响画面，不改变音量。设置即时生效并自动保存。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.formStyle(.grouped)
+            Divider()
+            HStack {
+                Button("恢复默认") { preferences.reset() }
+                Spacer()
+                Button("完成") { dismiss() }.keyboardShortcut(.defaultAction)
+            }.padding(16)
+        }.frame(width: 480, height: 440)
     }
 }
