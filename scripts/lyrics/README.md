@@ -16,6 +16,12 @@ python3 -I verify.py ~/Documents/musics/jay                          # check eve
 `-I` keeps Python from importing modules out of a music directory. Responses are
 cached under `cache/` (git ignored), so re-runs and re-scoring cost no requests.
 
+Order matters. Fetching writes LRCLIB's text verbatim, so **any re-run of
+`fetch_lyrics.py` must be followed by `convert_hant.swift` again** — the script
+does not convert at write time, and skipping this step puts Traditional text
+back on disk. Always pass the rollback directory as the converter's second
+argument, or the backup copies get converted too.
+
 ## What the files look like
 
 One `.lrc` per song, next to the audio file and sharing its stem — the match the

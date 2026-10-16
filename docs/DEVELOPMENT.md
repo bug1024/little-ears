@@ -89,8 +89,6 @@ swift scripts/lyrics/convert_hant.swift ~/Documents/musics/jay .lyrics-hant-back
 python3 -I scripts/lyrics/verify.py ~/Documents/musics/jay
 ```
 
-从 LRCLIB 为本地音乐目录补齐 sidecar `.lrc`，供应用「批量导入」使用；应用自身不联网。歌词与音频文件同目录同名，这正是批量导入优先匹配的规则（同目录 + 同文件名），同曲多格式共用一个歌词文件。`[ar:]/[ti:]/[al:]` 一律取自音频文件自身的标签，不使用 LRCLIB 的专辑字段。同步歌词优先，只有纯文本时按无时间轴歌词写入。
+从 LRCLIB 为本地音乐目录补齐 sidecar `.lrc`，供应用「批量导入」使用；应用自身不联网。歌词与音频文件同目录同名，正是批量导入优先匹配的规则（同目录 + 同文件名），同曲多格式共用一个歌词文件；`[ar:]/[ti:]/[al:]` 取自音频文件自身的标签，不使用 LRCLIB 的专辑字段。
 
-匹配结果按字典序元组排序而非加权求和，优先级不可互相抵消：有时间轴 > 时长同档 > 时间戳单调 > 简体 > 时长差最近 > 标题与歌手吻合。时长相差超过 5 秒直接排除。`/api/get` 对合法查询也会返回 503，只作兜底，以 `/api/search` 为主；`track_name` 索引有缺口，某首歌可能只有 `q=` 全文检索能找到，因此空数组（而非 503）才是"确实没有"的判据。`scripts/lyrics/overrides.json` 登记少数本地版本与 LRCLIB 记录时长或署名歌手不一致的曲目。
-
-繁转简使用 macOS 自带 ICU `Hant-Hans`（整目录单进程），只改汉字，时间戳与标签原样保留；第二个参数传入备份目录，使回退副本保持繁体原文。ICU 有意保留 `妳`，不算转换遗漏。响应缓存在被忽略的 `scripts/lyrics/cache/`，重跑与重新打分不产生额外请求。细节见 [`scripts/lyrics/README.md`](../scripts/lyrics/README.md)。
+整目录先 `fetch_lyrics.py` 落盘、再 `convert_hant.swift` 繁转简，两步顺序不可颠倒：重抓会把 LRCLIB 的繁体原文写回，必须再转换一次。转换的第二个参数是备份目录，使回退副本保持繁体原文；ICU 有意保留 `妳`，不算转换遗漏。匹配优先级、LRCLIB 接口的已知问题、登记个别曲目的 `overrides.json` 与响应缓存见 [`scripts/lyrics/README.md`](../scripts/lyrics/README.md)。
