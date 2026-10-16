@@ -128,9 +128,14 @@ final class TankRenderer: NSObject, MTKViewDelegate {
     func resetFrameClock() { last = ProcessInfo.processInfo.systemUptime }
 
     func viewProjection(width: Int, height: Int) -> simd_float4x4 {
-        let aspect = Float(width) / Float(max(1, height)), f: Float = 1 / tan(0.40 / 2)
+        let aspect = Float(max(1, width)) / Float(max(1, height))
+        // Preserve the authored 16:9 horizontal view on taller windows/screens.
+        // A fixed vertical FOV cropped the cave and the exposed moray head.
+        let verticalScale = min(1, aspect / (16.0 / 9.0))
+        let f: Float = verticalScale / tan(0.40 / 2)
         let near: Float = 0.1, far: Float = 80
-        let p = simd_float4x4(columns: (SIMD4(f / aspect, 0, 0, 0), SIMD4(0, f, 0, 0), SIMD4(0, 0, far / (near - far), -1), SIMD4(0, 0, near * far / (near - far), 0)))
+        // Off-axis projection keeps the existing seabed bottom anchored.
+        let p = simd_float4x4(columns: (SIMD4(f / aspect, 0, 0, 0), SIMD4(0, f, 0, 0), SIMD4(0, 1 - verticalScale, far / (near - far), -1), SIMD4(0, 0, near * far / (near - far), 0)))
         var v = matrix_identity_float4x4; v.columns.3 = SIMD4(-cameraPosition, 1)
         return p * v
     }

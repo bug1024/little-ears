@@ -76,6 +76,7 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(len(eel["parts"]), 1)  # Mouth target must not be drawn twice.
         self.assertEqual(eel["parts"][0]["motion"][0], 5)
         self.assertTrue(any(sum(x*x for x in v[8:11]) > 0.01 for v in eel["parts"][0]["vertices"]))
+        self.assertIn(0.45, data["collisionMargins"])  # Jaw and forward neck excursion.
         self.assertEqual(len(data["collisionMargins"]), len(data["collisionTriangles"]) // 3)
         for asset in data["species"]:
             self.assertIn("fishbody", {p["name"] for p in asset["parts"]})

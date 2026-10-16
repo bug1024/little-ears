@@ -61,6 +61,52 @@ final class AquariumTests: XCTestCase {
         XCTAssertEqual(changes(next, off, central: false), 0)
         XCTAssertGreaterThan(changes(first, next, central: true), 30)
     }
+    func testOptionalMorayIsVisibleAtDesktopAspectRatios() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let assets = root.appendingPathComponent("build/Little Ears.app/Contents/Resources/AquariumAssets")
+        guard MTLCreateSystemDefaultDevice() != nil, FileManager.default.fileExists(atPath: assets.appendingPathComponent("tank.json").path) else { throw XCTSkip("Local assets unavailable") }
+        let renderer = try TankRenderer(assets: assets, shader: AquariumResources.shader, population: [:])
+        renderer.bubbles = false; renderer.moonJellyCount = 0
+        for (width, height) in [(960, 600), (1280, 720), (720, 720)] {
+            renderer.showMoray = true
+            let on = try XCTUnwrap(renderer.offscreen(width: width, height: height))
+            renderer.showMoray = false
+            let off = try XCTUnwrap(renderer.offscreen(width: width, height: height))
+            let a = on.dataProvider!.data! as Data, b = off.dataProvider!.data! as Data
+            let changed = stride(from: 0, to: a.count, by: 4).filter { i in (0..<3).contains { abs(Int(a[i+$0]) - Int(b[i+$0])) > 3 } }.count
+            XCTAssertGreaterThan(changed, 40, "The moray must remain visible at \(width)x\(height)")
+        }
+    }
+    func testOptionalMorayOpenJawRemainsVisibleInFrontOfCaveLip() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let assets = root.appendingPathComponent("build/Little Ears.app/Contents/Resources/AquariumAssets")
+        guard MTLCreateSystemDefaultDevice() != nil, FileManager.default.fileExists(atPath: assets.appendingPathComponent("tank.json").path) else { throw XCTSkip("Local assets unavailable") }
+        let renderer = try TankRenderer(assets: assets, shader: AquariumResources.shader, population: [:])
+        renderer.bubbles = false; renderer.moonJellyCount = 0
+        func jawPixels(at time: Float) throws -> Int {
+            renderer.simulation.synchronizeClock(to: time)
+            renderer.showMoray = true
+            let on = try XCTUnwrap(renderer.offscreen(width: 1920, height: 1200))
+            renderer.showMoray = false
+            let off = try XCTUnwrap(renderer.offscreen(width: 1920, height: 1200))
+            let a = on.dataProvider!.data! as Data, b = off.dataProvider!.data! as Data
+            var visible = 0
+            // Lower-jaw/cave-lip region of the authored 16:10 composition.
+            // Before the fix, opening the mouth did not reveal more of the jaw:
+            // the cave depth cut it off (about 1,400 pixels in both poses).
+            for y in 925..<995 { for x in 0..<110 {
+                let i = y * on.bytesPerRow + x * 4
+                if (0..<3).contains(where: { abs(Int(a[i+$0]) - Int(b[i+$0])) > 8 }) { visible += 1 }
+            } }
+            return visible
+        }
+        let closed = try jawPixels(at: 7.354)
+        let half = try jawPixels(at: 1.5)
+        let open = try jawPixels(at: 3.427)
+        XCTAssertGreaterThan(closed, 100)
+        XCTAssertGreaterThan(Double(half), Double(closed) * 1.1)
+        XCTAssertGreaterThan(Double(open), Double(closed) * 1.4)
+    }
     @MainActor
     func testOutgoingViewCannotStealIncomingSurfaceBinding() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("Metal unavailable") }

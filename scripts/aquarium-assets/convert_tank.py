@@ -181,7 +181,7 @@ def build(source, output):
                     grouped[tex].append(transformed[index] + normal + list(uvs[index]) + delta + [part_id])
                 if scene and rid not in [411, 419]:
                     collisions.extend(transformed[index] for index in indices[face * 3:face * 3 + 3])
-                    margins.append(motion[1] * 1.5 if motion[0] == 1 else 0.46 if motion[0] == 3 else 0.20 if motion[0] == 2 else 0.06 if motion[0] == 4 else 0.30 if motion[0] == 5 else 0.32 if motion[0] == 6 else 0)
+                    margins.append(motion[1] * 1.5 if motion[0] == 1 else 0.46 if motion[0] == 3 else 0.20 if motion[0] == 2 else 0.06 if motion[0] == 4 else 0.45 if motion[0] == 5 else 0.32 if motion[0] == 6 else 0)
             for tex, vertices in grouped.items():
                 parts.append(dict(name=n["name"], texture=tex, vertices=vertices, sway=0, pivot=pivot, motion=motion))
         if not parts:

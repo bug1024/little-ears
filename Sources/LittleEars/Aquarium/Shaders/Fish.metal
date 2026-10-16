@@ -53,9 +53,13 @@ vertex TankRaster tankVertex(uint id [[vertex_id]], const device Vertex *vertice
             float head = clamp((u.pivot.x - p.x) / u.pivot.w, 0.0, 1.0);
             float breath = 0.5 - 0.5 * cos(t * frequency + seed);
             p += float3(v.bend) * breath;
-            p.z += amplitude * head * head * sin(t * 0.32 + seed);
-            p.x -= amplitude * head * head * (0.5 - 0.5 * cos(t * 0.22));
-            p.y += 0.015 * head * sin(t * frequency + seed);
+            // Opening the original jaw target needs clearance from the cave lip.
+            // The neck leans forward with the breath; the hidden tail stays fixed.
+            float neck = head * head;
+            p.z += neck * (0.10 + 0.24 * breath + amplitude * 0.25 * sin(t * 0.32 + seed));
+            p.y += neck * 0.045 * breath;
+            p.x -= amplitude * 0.15 * neck * (0.5 - 0.5 * cos(t * 0.22));
+            p.y += 0.008 * head * sin(t * frequency + seed);
         } else if (kind > 5.5) {
             // A bounded, very slow sand route. Root vertices of all five arms
             // share the same translation; only their tips flex independently.
