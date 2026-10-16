@@ -5,7 +5,7 @@ let package = Package(
     products: [.executable(name: "LittleEars", targets: ["LittleEars"])],
     dependencies: [.package(url: "https://github.com/groue/GRDB.swift.git", exact: "7.0.0")],
     targets: [
-        .executableTarget(name: "LittleEars", dependencies: [.product(name: "GRDB", package: "GRDB.swift")]),
+        .executableTarget(name: "LittleEars", dependencies: [.product(name: "GRDB", package: "GRDB.swift")], resources: [.copy("Aquarium/Shaders")]),
         .testTarget(name: "LittleEarsTests", dependencies: ["LittleEars"], resources: [.copy("Fixtures")])
     ]
 )

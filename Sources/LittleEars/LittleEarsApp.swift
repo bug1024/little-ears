@@ -55,9 +55,18 @@ struct MainScene: View {
     @Environment(\.openWindow) var openWindow
     let delegate: AppDelegate
     @EnvironmentObject var model: AppModel
+    @StateObject private var aquariumHUD = AquariumImmersiveHUD()
     var body: some View {
-        ContentView()
+        ZStack {
+            if model.aquariumImmersive {
+                AquariumImmersiveView(hud: aquariumHUD).environmentObject(model)
+            } else {
+                ContentView()
+            }
+        }
+            .background(AquariumFullScreenBridge(active: model.aquariumImmersive, exit: { model.aquariumImmersive = false }, activity: { aquariumHUD.recordActivity() }))
             .background(PlaybackKeyboardShortcuts(playingPage: model.page == "playing") { command in
+                if model.aquariumImmersive { aquariumHUD.recordActivity() }
                 switch command {
                 case .togglePlayback: model.togglePlayback()
                 case .previous: model.previousTrack()

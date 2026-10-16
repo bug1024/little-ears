@@ -349,6 +349,8 @@ struct SpectrumPlot: View {
 struct NowPlayingView: View {
     @EnvironmentObject var model: AppModel
     @AppStorage("spectrumEnabled") var spectrumEnabled = true
+    @AppStorage("playingVisualization") var visualization = "spectrum"
+    @State private var showingAquariumSettings = false
     let palette: Palette
     @State private var draggedID: String?
     @State private var showingInfo = false
@@ -362,13 +364,29 @@ struct NowPlayingView: View {
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 7) {
-                        Text("\(model.currentTrack?.format ?? "本地音频") · 音频频谱")
-                            .font(.system(size: 10, design: .monospaced)).foregroundStyle(palette.secondary)
+                        Picker("播放画面", selection: $visualization) {
+                            Text("频谱").tag("spectrum"); Text("水族箱").tag("aquarium")
+                        }.labelsHidden().pickerStyle(.segmented).controlSize(.mini)
+                            .frame(width: 132).accessibilityLabel("播放画面")
+                        if visualization == "aquarium" {
+                            AquariumAmbientButton(controller: model.aquarium)
+                                .font(.system(size: 10)).controlSize(.mini)
+                        }
                         Spacer()
                         Circle().fill(playbackColor).frame(width: 5, height: 5)
-                        Text(model.currentTrack == nil ? "待播放" : spectrumEnabled ? (model.isPlaying ? "实时" : "已暂停") : "频谱已关闭").font(.system(size: 10)).foregroundStyle(palette.secondary)
+                        Text(visualization == "aquarium" ? "轻松聆听" : model.currentTrack == nil ? "待播放" : spectrumEnabled ? (model.isPlaying ? "实时" : "已暂停") : "频谱已关闭").font(.system(size: 10)).foregroundStyle(palette.secondary)
+                        if visualization == "aquarium" {
+                            Button { model.aquariumImmersive = true } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                                .help("沉浸全屏 · Esc 退出").accessibilityLabel("水族箱沉浸全屏")
+                            Button { showingAquariumSettings = true } label: { Image(systemName: "slider.horizontal.3") }
+                                .help("水族箱场景配置").accessibilityLabel("水族箱场景配置")
+                        }
                     }.padding(.bottom, 8)
-                    if model.currentTrack == nil {
+                    if visualization == "aquarium" {
+                        AquariumSurface(controller: model.aquarium, musicPlaying: model.isPlaying)
+                            .frame(minHeight: 160, maxHeight: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else if model.currentTrack == nil {
                         VStack(spacing: 14) {
                             Image(systemName: "ear.badge.waveform").font(.system(size: 38, weight: .ultraLight)).foregroundStyle(palette.secondary.opacity(0.5))
                             Button("前往音乐库") { model.page = "library" }
@@ -411,7 +429,10 @@ struct NowPlayingView: View {
                 Rectangle().fill(palette.border).frame(width: 1)
                 queuePanel.frame(width: 264).background(LinearGradient(colors: [palette.surface.opacity(0.55), palette.background], startPoint: .top, endPoint: .bottom))
             }
-        }.onAppear { model.setSpectrumVisible(true) }.onDisappear { model.setSpectrumVisible(false) }
+        }.onAppear { model.setSpectrumVisible(visualization == "spectrum") }
+            .onDisappear { model.setSpectrumVisible(false) }
+            .onChange(of: visualization) { _, value in model.setSpectrumVisible(value == "spectrum") }
+            .sheet(isPresented: $showingAquariumSettings) { AquariumSettingsPanel(controller: model.aquarium) }
     }
     private var queuePanel: some View {
         VStack(alignment: .leading, spacing: 0) {

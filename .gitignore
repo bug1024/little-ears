@@ -16,3 +16,8 @@ xcuserdata/
 .env.*
 !.env.example
 *.log
+
+# Local aquarium source assets and Python cache
+/local-assets/
+__pycache__/
+*.pyc

@@ -29,6 +29,7 @@ final class AppModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var stats = Stats()
     @Published var page = "library"
+    @Published var aquariumImmersive = false
     @Published var selectedFolder: String? { didSet { if selectedFolder != oldValue { cachedVisibleTracks = nil } } }
     @Published var search = "" { didSet { if search != oldValue { cachedVisibleTracks = nil } } }
     @Published var includeChildren = false { didSet { if includeChildren != oldValue { cachedVisibleTracks = nil } } }
@@ -37,6 +38,7 @@ final class AppModel: ObservableObject {
     @Published var trackDetailsTarget: TrackDetailsTarget?
     @Published var listeningDayTarget: ListeningCalendarDay?
     let spectrumDisplay = SpectrumDisplay()
+    let aquarium = AquariumController()
     private var spectrumRequested = false
     private var spectrumEnabled = true
     private var spectrumWindowVisible = true
@@ -96,7 +98,7 @@ final class AppModel: ObservableObject {
             }
         }
         engine.onEnd = { [weak self] in self?.naturalEnd() }
-        self.sleepTimer.onExpired = { [weak self] in self?.pause() }
+        self.sleepTimer.onExpired = { [weak self] in self?.pause(); self?.aquarium.muteForSleepTimer() }
         let playbackTimer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in Task { @MainActor in self?.tick() } }
         RunLoop.main.add(playbackTimer, forMode: .common)
         timer = playbackTimer
@@ -424,6 +426,7 @@ final class AppModel: ObservableObject {
         }
     }
     func shutdown() async {
+        aquarium.stop()
         sleepTimer.cancel()
         pause(); finishSession(reason: "quit", completed: false); checkpoint(); await writeTask?.value
         scopedRoots.forEach { $0.stopAccessingSecurityScopedResource() }
