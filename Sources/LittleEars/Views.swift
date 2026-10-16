@@ -318,27 +318,54 @@ struct SpectrumPlot: View {
         Canvas { context, size in
             let baseline = size.height * 0.82
             let plotHeight = max(1, baseline - 8)
-            let step = size.width / CGFloat(max(1, display.frame.levels.count))
+            let levels = ClassicSpectrumBands.resample(display.frame.levels)
+            let peaks = ClassicSpectrumBands.resample(display.frame.peaks)
+            let peakReferences = ClassicSpectrumBands.resample(display.frame.peakReferences)
+            let step = size.width / CGFloat(max(1, levels.count))
+            let gap = min(6, max(2, step * 0.32))
+            let width = max(1, step - gap)
             var bars = Path()
-            for (index, level) in display.frame.levels.enumerated() {
-                let height = max(1, CGFloat(min(1, Double(level) * preferences.amplitude)) * plotHeight)
-                let rect = CGRect(x: CGFloat(index) * step + 1.2, y: baseline - height, width: max(1, step - 2.4), height: height)
-                bars.addRoundedRect(in: rect, cornerSize: CGSize(width: 2, height: 2))
+            for (index, level) in levels.enumerated() {
+                let height = CGFloat(min(1, Double(level) * preferences.amplitude)) * plotHeight
+                guard height > 0 else { continue }
+                let rect = CGRect(x: CGFloat(index) * step + gap / 2, y: baseline - height, width: width, height: height)
+                let radius = min(2.5, min(width / 2, height / 2))
+                bars.addPath(UnevenRoundedRectangle(topLeadingRadius: radius, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: radius).path(in: rect))
             }
             if palette.dark && preferences.glow {
                 var light = context
-                light.addFilter(.blur(radius: 8))
-                light.fill(bars, with: .color(palette.accent.opacity(playing ? 0.16 : 0.08)))
+                light.addFilter(.blur(radius: 6))
+                light.fill(bars, with: .color(palette.accent.opacity(playing ? 0.07 : 0.035)))
             }
-            context.fill(bars, with: .linearGradient(Gradient(colors: [palette.accent.opacity(palette.dark ? 0.95 : 0.9), palette.accent.opacity(palette.dark ? 0.45 : 0.55)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: baseline)))
-            for (index, level) in display.frame.levels.enumerated() {
-                let x = CGFloat(index) * step + 1.2
-                let reflection = CGRect(x: x, y: baseline + 3, width: max(1, step - 2.4), height: CGFloat(min(1, Double(level) * preferences.amplitude)) * plotHeight * 0.14)
-                if preferences.reflection { context.fill(Path(reflection), with: .linearGradient(Gradient(colors: [palette.accent.opacity(palette.dark ? 0.18 : 0.06), .clear]), startPoint: CGPoint(x: x, y: baseline), endPoint: CGPoint(x: x, y: reflection.maxY))) }
-                if preferences.peaks && index < display.frame.peaks.count {
-                    let peak = CGFloat(min(1, Double(display.frame.peaks[index]) * preferences.amplitude)) * plotHeight
-                    if peak > 3 {
-                        context.fill(Path(CGRect(x: x, y: baseline - peak - 3, width: max(1, step - 2.4), height: 1)), with: .color(palette.accent.opacity(0.7)))
+            let colors: [Color] = palette.accentName == "blue" && palette.dark
+                ? [Color(hex: 0x91D0F0), Color(hex: 0x6BA8C8), Color(hex: 0x38586E)]
+                : [palette.accent.opacity(0.92), palette.accent.opacity(0.74), palette.accent.opacity(0.36)]
+            context.fill(bars, with: .linearGradient(Gradient(stops: [.init(color: colors[0], location: 0), .init(color: colors[1], location: 0.48), .init(color: colors[2], location: 1)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: baseline)))
+            // Darken only the foot of the existing fill; preserve its top color
+            // and do not add another glow or alter the audio-driven heights.
+            var foot = context
+            foot.clip(to: bars)
+            for (index, level) in levels.enumerated() {
+                let x = CGFloat(index) * step + gap / 2
+                let height = CGFloat(min(1, Double(level) * preferences.amplitude)) * plotHeight
+                if height > 0 {
+                    let footTop = baseline - height * 0.12
+                    foot.fill(Path(CGRect(x: x, y: footTop, width: width, height: height * 0.12)), with: .linearGradient(Gradient(colors: [.clear, .black.opacity(palette.dark ? 0.22 : 0.10)]), startPoint: CGPoint(x: x, y: footTop), endPoint: CGPoint(x: x, y: baseline)))
+                }
+                if preferences.reflection && level > 0 {
+                    let reflection = CGRect(x: x, y: baseline + 3, width: width, height: height * 0.09)
+                    var reflected = context
+                    reflected.addFilter(.blur(radius: 0.8))
+                    reflected.fill(Path(reflection), with: .linearGradient(Gradient(stops: [.init(color: palette.accent.opacity(palette.dark ? 0.10 : 0.04), location: 0), .init(color: .clear, location: 0.7)]), startPoint: CGPoint(x: x, y: reflection.minY), endPoint: CGPoint(x: x, y: reflection.maxY)))
+                }
+                if preferences.peaks && index < peaks.count {
+                    let peak = CGFloat(min(1, Double(peaks[index]) * preferences.amplitude)) * plotHeight
+                    // Peak hold remains in the audio processor; only reveal a cap
+                    // once it separates clearly from the instantaneous bar top.
+                    if peak - height > 5 && peak > 6 {
+                        let fade = index < peakReferences.count
+                            ? ClassicSpectrumBands.peakOpacity(peak: peaks[index], reference: peakReferences[index]) : 1
+                        context.fill(Path(CGRect(x: x + width * 0.16, y: baseline - peak - 1, width: width * 0.68, height: 0.75)), with: .color(palette.accent.opacity((palette.dark ? 0.46 : 0.40) * fade)))
                     }
                 }
             }
@@ -347,6 +374,50 @@ struct SpectrumPlot: View {
         }.accessibilityLabel("实时音频频谱").accessibilityValue(playing ? "正在显示播放音频的频谱" : "已暂停")
     }
 }
+struct SpectrumQuickToggle: View {
+    @Binding var isOn: Bool
+    let palette: Palette
+    var body: some View {
+        PlaybackQuickToggle(isOn: isOn, name: "频谱", onIcon: "waveform", offIcon: "waveform.slash",
+                            tooltip: isOn ? "关闭实时频谱" : "开启实时频谱", accessibilityName: "实时音频频谱", palette: palette) { isOn.toggle() }
+    }
+}
+
+struct PlaybackQuickToggle: View {
+    let isOn: Bool
+    let name: String
+    let onIcon: String
+    let offIcon: String
+    let tooltip: String
+    let accessibilityName: String
+    let palette: Palette
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: isOn ? onIcon : offIcon).frame(width: 12)
+                Text(name + (isOn ? "开启" : "关闭"))
+            }
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(isOn ? palette.accent.opacity(0.9) : palette.secondary)
+            .padding(.horizontal, 7).padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 5).fill(isOn ? palette.accent.opacity(hovering ? 0.16 : 0.08) : palette.secondary.opacity(hovering ? 0.13 : 0.05)))
+            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(isOn ? palette.accent.opacity(0.20) : palette.border, lineWidth: 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: 5))
+        }.buttonStyle(.plain)
+            .help(tooltip)
+            .accessibilityLabel(accessibilityName)
+            .accessibilityValue(isOn ? "已开启" : "已关闭")
+            .onHover { inside in
+                guard hovering != inside else { return }
+                hovering = inside
+                if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+            .onDisappear { if hovering { NSCursor.pop(); hovering = false } }
+    }
+}
+
 struct NowPlayingView: View {
     @EnvironmentObject var model: AppModel
     @AppStorage("spectrumEnabled") var spectrumEnabled = true
@@ -372,20 +443,14 @@ struct NowPlayingView: View {
                         }.labelsHidden().pickerStyle(.segmented).controlSize(.mini)
                             .frame(width: 132).accessibilityLabel("播放画面")
                         if visualization == "aquarium" {
-                            AquariumAmbientButton(controller: model.aquarium)
+                            AquariumAmbientButton(controller: model.aquarium, palette: palette)
                                 .font(.system(size: 10)).controlSize(.mini)
                         } else {
-                            Button { spectrumEnabled.toggle() } label: {
-                                Label(spectrumEnabled ? "频谱已开启" : "频谱已关闭", systemImage: "waveform")
-                            }
-                            .font(.system(size: 10)).controlSize(.mini)
-                            .help(spectrumEnabled ? "关闭实时音频频谱" : "开启实时音频频谱")
-                            .accessibilityLabel("实时音频频谱")
-                            .accessibilityValue(spectrumEnabled ? "已开启" : "已关闭")
+                            SpectrumQuickToggle(isOn: $spectrumEnabled, palette: palette)
                         }
                         Spacer()
                         Circle().fill(playbackColor).frame(width: 5, height: 5)
-                        Text(visualization == "aquarium" ? "轻松聆听" : model.currentTrack == nil ? "待播放" : spectrumEnabled ? (model.isPlaying ? "实时" : "已暂停") : "频谱已关闭").font(.system(size: 10)).foregroundStyle(palette.secondary)
+                        Text(model.currentTrack == nil ? "待播放" : model.isPlaying ? "正在播放" : "已暂停").font(.system(size: 10)).foregroundStyle(palette.secondary)
                         if visualization == "aquarium" {
                             Button { model.aquariumImmersive = true } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
                                 .help("沉浸全屏 · Esc 退出").accessibilityLabel("水族箱沉浸全屏")

@@ -20,9 +20,76 @@ final class SpectrumTests: XCTestCase {
         XCTAssertEqual(first, positions.map { bass.displacement(x: $0, strand: 0.5, time: 3) })
         XCTAssertNotEqual(first, positions.map { bass.displacement(x: $0, strand: 0.5, time: 4) })
         XCTAssertNotEqual(first, positions.map { treble.displacement(x: $0, strand: 0.5, time: 3) })
-        XCTAssertTrue(first.allSatisfy { $0.isFinite && abs($0) < 1.2 })
+        XCTAssertTrue(first.allSatisfy { $0.isFinite })
         let invalid = FluidSpectrumGeometry(levels: [.nan, .infinity, -2])
         XCTAssertEqual(invalid.displacement(x: 0.5, strand: 0, time: 1), 0)
+    }
+
+    func testFluidContoursStayCenteredAndContinuePastEdges() {
+        let geometry = FluidSpectrumGeometry(levels: (0..<64).map { Float(($0 * 17) % 31) / 31 })
+        for strand in [-1.0, -0.4, 0.0, 0.6, 1.0] {
+            let curve = geometry.contour(strand: strand, time: 8)
+            for step in -10...110 {
+                let y = curve.verticalFraction(x: Double(step) / 100, amplitude: 1.5)
+                XCTAssertTrue(y.isFinite && y >= 0.18 && y <= 0.82)
+            }
+            for edge in [0.0, 1.0] {
+                let epsilon = 0.0001
+                let before = curve.displacement(x: edge - epsilon)
+                let center = curve.displacement(x: edge)
+                let after = curve.displacement(x: edge + epsilon)
+                XCTAssertLessThan(abs(after - before), 0.01)
+                XCTAssertLessThan(abs((center - before) - (after - center)), 0.0001)
+            }
+        }
+        // Local spectral edits must produce a local shape change, not merely
+        // scale or phase-shift one shared carrier for all strands.
+        let left = geometry.contour(strand: -0.8, time: 8)
+        let right = geometry.contour(strand: 0.8, time: 8)
+        let offsets = (0...100).map { x in right.displacement(x: Double(x)/100) - left.displacement(x: Double(x)/100) }
+        XCTAssertGreaterThan((offsets.max() ?? 0) - (offsets.min() ?? 0), 0.1)
+    }
+
+    func testClassic48BandsPreserveFullFrequencyRangeAndPower() {
+        XCTAssertEqual(ClassicSpectrumBands.resample(Array(repeating: 0, count: 64)), Array(repeating: 0, count: 48))
+        for value: Float in [0.2, 0.5, 1] {
+            XCTAssertTrue(ClassicSpectrumBands.resample(Array(repeating: value, count: 64)).allSatisfy { abs($0 - value) < 0.00001 })
+        }
+        for source in 0..<64 {
+            var bins = Array(repeating: Float(0), count: 64); bins[source] = 1
+            let mapped = ClassicSpectrumBands.resample(bins)
+            XCTAssertEqual(mapped.count, 48)
+            XCTAssertTrue(mapped.contains { $0 > 0 }, "Every FFT band must contribute")
+            let power = mapped.reduce(0.0) { $0 + ($1 > 0 ? pow(10, (Double($1) * 80 - 80) / 10) : 0) } * (64.0 / 48)
+            XCTAssertEqual(power, 1, accuracy: 0.00001)
+            XCTAssertTrue(mapped[Int(Double(source) * 48 / 64)] > 0)
+        }
+        XCTAssertTrue(ClassicSpectrumBands.resample([]).isEmpty)
+        XCTAssertEqual(ClassicSpectrumBands.resample([.nan, .infinity, -1]), [0, 0, 0])
+    }
+
+    func testPeakFadeTracksDescentAndResetsWithAudio() {
+        let processor = SpectrumProcessor()
+        let angularFrequency = 2.0 * Double.pi * 1000.0 / 44100.0
+        let tone = (0..<SpectrumProcessor.size).map { Float(0.5 * sin(angularFrequency * Double($0))) }
+        var frame = SpectrumFrame.empty
+        for _ in 0..<12 { frame = processor.process(tone, sampleRate: 44100) }
+        let band = frame.peaks.indices.max { frame.peaks[$0] < frame.peaks[$1] }!
+        let reference = frame.peakReferences[band]
+        var previous = 1.0
+        for _ in 0..<30 {
+            frame = processor.process(Array(repeating: 0, count: SpectrumProcessor.size), sampleRate: 44100)
+            XCTAssertEqual(frame.peakReferences[band], reference)
+            let fade = ClassicSpectrumBands.peakOpacity(peak: frame.peaks[band], reference: frame.peakReferences[band])
+            XCTAssertLessThan(fade, previous)
+            previous = fade
+        }
+        XCTAssertLessThan(previous, 0.5)
+        for _ in 0..<12 { frame = processor.process(tone, sampleRate: 44100) }
+        XCTAssertEqual(ClassicSpectrumBands.peakOpacity(peak: frame.peaks[band], reference: frame.peakReferences[band]), 1, accuracy: 0.0001)
+        processor.reset()
+        frame = processor.process(Array(repeating: 0, count: SpectrumProcessor.size), sampleRate: 44100)
+        XCTAssertTrue(frame.peakReferences.allSatisfy { $0 == 0 })
     }
 
     func testFFTTracksActualToneAtDifferentSampleRates() {

@@ -3,13 +3,12 @@ import AppKit
 
 struct AquariumAmbientButton: View {
     @ObservedObject var controller: AquariumController
+    let palette: Palette
     var body: some View {
-        Button(action: controller.toggleAmbient) {
-            Label("气泡音", systemImage: controller.configuration.ambientEnabled ? "speaker.wave.2" : "speaker.slash")
-        }
-        .help(controller.configuration.ambientEnabled ? "关闭气泡环境音" : "开启气泡环境音")
-        .accessibilityLabel("气泡环境音")
-        .accessibilityValue(controller.configuration.ambientEnabled ? "已开启" : "已关闭")
+        PlaybackQuickToggle(isOn: controller.configuration.ambientEnabled, name: "气泡音",
+                            onIcon: "speaker.wave.2", offIcon: "speaker.slash",
+                            tooltip: controller.configuration.ambientEnabled ? "关闭气泡环境音" : "开启气泡环境音",
+                            accessibilityName: "气泡环境音", palette: palette, action: controller.toggleAmbient)
     }
 }
 
@@ -72,7 +71,7 @@ struct AquariumImmersiveView: View {
                             }.buttonStyle(.borderless).disabled(model.currentTrack == nil)
                                 .frame(height: 28)
                             Divider().frame(height: 24)
-                            AquariumAmbientButton(controller: model.aquarium).controlSize(.small)
+                            AquariumAmbientButton(controller: model.aquarium, palette: palette).controlSize(.small)
                             HStack(spacing: 6) {
                                 Image(systemName: model.volume == 0 ? "speaker.slash" : "speaker.wave.2").foregroundStyle(.secondary)
                                 Slider(value: Binding(get: { Double(model.volume) }, set: { model.volume = Float($0) }), in: 0...1)

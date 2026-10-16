@@ -7,12 +7,39 @@ struct SpectrumFrame: Sendable {
     var levels: [Float]
     var peaks: [Float]
     var sampleRate: Double
+    var peakReferences: [Float] = []
     var motionTime: Double = 0
     var revision = 0
     var epoch = 0
     var isReset = false
     static let empty = SpectrumFrame(levels: Array(repeating: 0, count: 64), peaks: Array(repeating: 0, count: 64), sampleRate: 44100)
 }
+/// Resample the full logarithmic FFT range with fractional band overlap.
+/// Average in linear power, not decibels, so no source band is dropped.
+enum ClassicSpectrumBands {
+    static func peakOpacity(peak: Float, reference: Float) -> Double {
+        guard peak.isFinite, reference.isFinite, reference > 0 else { return 0 }
+        let remaining = Double(min(1, max(0, peak / reference)))
+        return remaining * remaining
+    }
+    static func resample(_ values: [Float], count: Int = 48) -> [Float] {
+        guard !values.isEmpty, count > 0 else { return [] }
+        let count = min(count, values.count)
+        let ratio = Double(values.count) / Double(count)
+        return (0..<count).map { band in
+            let lower = Double(band) * ratio, upper = Double(band + 1) * ratio
+            var power = 0.0
+            for index in Int(floor(lower))..<min(values.count, Int(ceil(upper))) {
+                let overlap = max(0, min(upper, Double(index + 1)) - max(lower, Double(index)))
+                let level = values[index].isFinite ? Double(min(1, max(0, values[index]))) : 0
+                if level > 0 { power += pow(10, (level * 80 - 80) / 10) * overlap }
+            }
+            guard power > 0 else { return 0 }
+            return Float(max(0, min(1, (10 * log10(power / ratio) + 80) / 80)))
+        }
+    }
+}
+
 @MainActor
 final class SpectrumDisplay: ObservableObject {
     @Published var frame = SpectrumFrame.empty
@@ -31,12 +58,13 @@ final class SpectrumProcessor {
     private var power = [Float](repeating: 0, count: size / 2)
     private var levels = [Float](repeating: 0, count: bands)
     private var peaks = [Float](repeating: 0, count: bands)
+    private var peakReferences = [Float](repeating: 0, count: bands)
     init() {
         setup = vDSP_create_fftsetup(12, FFTRadix(kFFTRadix2))!
         vDSP_hann_window(&window, vDSP_Length(Self.size), Int32(vDSP_HANN_NORM))
     }
     deinit { vDSP_destroy_fftsetup(setup) }
-    func reset() { levels = Array(repeating: 0, count: Self.bands); peaks = levels; motionTime = 0 }
+    func reset() { levels = Array(repeating: 0, count: Self.bands); peaks = levels; peakReferences = levels; motionTime = 0 }
     static func frequencyRange(band: Int, sampleRate: Double) -> ClosedRange<Double> {
         let upper = min(16000, sampleRate / 2)
         let ratio = upper / 30
@@ -68,10 +96,16 @@ final class SpectrumProcessor {
             let target = decibels.isFinite ? max(0, min(1, (decibels + 80) / 80)) : 0
             let coefficient: Float = target > levels[band] ? 0.62 : 0.14
             levels[band] += (target - levels[band]) * coefficient
-            peaks[band] = max(levels[band], peaks[band] - 0.012)
+            let fallingPeak = max(0, peaks[band] - 0.012)
+            if levels[band] >= fallingPeak {
+                peaks[band] = levels[band]
+                peakReferences[band] = levels[band]
+            } else {
+                peaks[band] = fallingPeak
+            }
         }
         motionTime += 1.0 / 30.0
-        return SpectrumFrame(levels: levels, peaks: peaks, sampleRate: sampleRate, motionTime: motionTime)
+        return SpectrumFrame(levels: levels, peaks: peaks, sampleRate: sampleRate, peakReferences: peakReferences, motionTime: motionTime)
     }
 }
 
@@ -216,32 +250,71 @@ struct SpectrumPreferences: DynamicProperty {
 /// FFT-driven ribbon geometry. Silence collapses every strand onto the center;
 /// time advances only when another PCM window is analyzed, so pause is static.
 struct FluidSpectrumGeometry {
-    let safe: [Double]
-    let energy: Double
-    let bass: Double
-    let treble: Double
+    private let levels: [Double]
+    private let mean: Double
+    private let energy: Double
     init(levels: [Float]) {
-        safe = levels.map { $0.isFinite ? Double(min(1, max(0, $0))) : 0 }
-        energy = pow(sqrt(safe.reduce(0) { $0 + $1 * $1 } / Double(max(1, safe.count))), 0.65)
-        let split = max(1, safe.count / 3)
-        bass = safe.prefix(split).reduce(0, +) / Double(split)
-        treble = safe.suffix(split).reduce(0, +) / Double(split)
+        self.levels = levels.map { $0.isFinite ? Double(min(1, max(0, $0))) : 0 }
+        mean = self.levels.reduce(0, +) / Double(max(1, levels.count))
+        energy = pow(sqrt(self.levels.reduce(0) { $0 + $1 * $1 } / Double(max(1, levels.count))), 0.65)
+    }
+    // Reflect frequency coordinates at the ends, avoiding a wrap seam between
+    // bass and treble. Cubic interpolation also smooths narrow FFT peaks.
+    private func sample(_ position: Double) -> Double {
+        guard levels.count > 1 else { return levels.first ?? 0 }
+        let end = Double(levels.count - 1)
+        var coordinate = position.truncatingRemainder(dividingBy: end * 2)
+        if coordinate < 0 { coordinate += end * 2 }
+        if coordinate > end { coordinate = end * 2 - coordinate }
+        return FluidSpectrumContour.interpolate(levels, at: coordinate)
+    }
+    func contour(strand: Double, time: Double) -> FluidSpectrumContour {
+        // Each strand reads different, overlapping frequency neighborhoods.
+        // Audio-frame time advects that field; there is no clock-driven sine
+        // carrier or random motion shared by the entire ribbon.
+        let scale = Double(max(1, levels.count - 1)) / 63
+        func field(_ offset: Double) -> [Double] {
+            (-2...14).map { node in
+                let x = Double(node)
+                let a = sample((x * 4.35 + time * 1.7 + offset * 5.2) * scale)
+                let b = sample((x * 3.13 - time * 1.1 + 21.7 - offset * 8.4) * scale)
+                let c = sample((x * 5.21 + time * 0.7 + 45.1 + offset * offset * 9.3) * scale)
+                return (a - b) * (1.1 + offset * 0.22) + (c - mean) * (0.7 - offset * 0.2)
+            }
+        }
+        let common = field(0), detail = field(strand)
+        let raw = zip(common, detail).map { $0 * 0.72 + $1 * 0.28 }
+        var smooth = raw.indices.map { i in
+            raw[max(0, i - 1)] * 0.22 + raw[i] * 0.56 + raw[min(raw.count - 1, i + 1)] * 0.22
+        }
+        let center = smooth[2...14].reduce(0, +) / 13
+        // Remove spectral tilt (bass is usually louder) without pinching the
+        // endpoints to zero. Keep strands coherent while retaining local detail.
+        let slope = (2...14).reduce(0.0) { $0 + Double($1 - 8) * (smooth[$1] - center) } / 182
+        for i in smooth.indices {
+            smooth[i] = (smooth[i] - center - slope * Double(i - 8)) * 2.8 + strand * energy * 0.13
+        }
+        return FluidSpectrumContour(values: smooth)
     }
     func displacement(x: Double, strand: Double, time: Double) -> Double {
-        guard !safe.isEmpty else { return 0 }
-        let position = min(Double(safe.count - 1), max(0, x * Double(safe.count - 1)))
-        let index = Int(position), next = min(safe.count - 1, index + 1)
-        func average(_ center: Int) -> Double {
-            let low = max(0, center - 3), high = min(safe.count - 1, center + 3)
-            return safe[low...high].reduce(0, +) / Double(high - low + 1)
-        }
-        let fraction = position - Double(index)
-        let local = average(index) * (1 - fraction) + average(next) * fraction
-        let a = sin(x * .pi * (2.6 + bass) - time * 1.4 + strand * 1.1)
-        let b = sin(x * .pi * 5.1 + time * 0.8 + strand * 1.6)
-        let c = sin(x * .pi * 8.0 - time * 0.55 + strand * 0.4)
-        let envelope = 0.45 + 0.55 * sin(min(1, max(0, x)) * .pi)
-        return energy * envelope * ((a * 0.62 + b * 0.28 + c * treble * 0.14) * (0.65 + local * 0.35) + strand * b * 0.42)
+        contour(strand: strand, time: time).displacement(x: x)
+    }
+}
+
+struct FluidSpectrumContour {
+    let values: [Double]
+    static func interpolate(_ values: [Double], at coordinate: Double) -> Double {
+        guard !values.isEmpty else { return 0 }
+        let position = min(Double(values.count - 1), max(0, coordinate))
+        let index = Int(position), t = position - Double(index)
+        let a = values[max(0, index - 1)], b = values[index]
+        let c = values[min(values.count - 1, index + 1)], d = values[min(values.count - 1, index + 2)]
+        return 0.5 * ((2 * b) + (-a + c) * t + (2*a - 5*b + 4*c - d) * t*t + (-a + 3*b - 3*c + d) * t*t*t)
+    }
+    func displacement(x: Double) -> Double { Self.interpolate(values, at: x * 12 + 2) }
+    func verticalFraction(x: Double, amplitude: Double) -> Double {
+        // Soft compression reserves the middle 64% even at maximum gain.
+        0.5 - tanh(displacement(x: x) * amplitude * 1.6) * 0.32
     }
 }
 
@@ -258,12 +331,13 @@ struct FluidSpectrumPlot: View {
             let steps = max(96, min(240, Int(size.width / 4)))
             for layer in 0..<layers {
                 let strand = Double(layer) / Double(max(1, layers - 1)) * 2 - 1
+                let contour = geometry.contour(strand: strand, time: frame.motionTime)
                 var path = Path()
-                for step in 0...steps {
+                // Continue beyond the viewport; clipping does not cap or fold the edges.
+                for step in -12...(steps + 12) {
                     let x = Double(step) / Double(steps)
-                    let y = geometry.displacement(x: x, strand: strand, time: frame.motionTime)
-                    let point = CGPoint(x: x * size.width, y: size.height * 0.48 - y * size.height * 0.42 * amplitude)
-                    if step == 0 { path.move(to: point) } else { path.addLine(to: point) }
+                    let point = CGPoint(x: x * size.width, y: contour.verticalFraction(x: x, amplitude: amplitude) * size.height)
+                    if step == -12 { path.move(to: point) } else { path.addLine(to: point) }
                 }
                 let central = 1 - abs(strand)
                 let color = palette.accent.opacity((palette.dark ? 0.30 : 0.16) + central * (palette.dark ? 0.50 : 0.40))
@@ -274,7 +348,7 @@ struct FluidSpectrumPlot: View {
                 }
                 context.stroke(path, with: .linearGradient(Gradient(colors: [color.opacity(0.45), color, color.opacity(0.65), color, color.opacity(0.45)]), startPoint: .zero, endPoint: CGPoint(x: size.width, y: 0)), lineWidth: 0.8 + central * 0.35)
             }
-        }.accessibilityLabel("流体声波").accessibilityValue("由真实音频频谱驱动")
+        }.clipped().accessibilityLabel("流体声波").accessibilityValue("由真实音频频谱驱动")
     }
 }
 
