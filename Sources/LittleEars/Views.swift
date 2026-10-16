@@ -371,6 +371,14 @@ struct NowPlayingView: View {
                         if visualization == "aquarium" {
                             AquariumAmbientButton(controller: model.aquarium)
                                 .font(.system(size: 10)).controlSize(.mini)
+                        } else {
+                            Button { spectrumEnabled.toggle() } label: {
+                                Label(spectrumEnabled ? "频谱已开启" : "频谱已关闭", systemImage: "waveform")
+                            }
+                            .font(.system(size: 10)).controlSize(.mini)
+                            .help(spectrumEnabled ? "关闭实时音频频谱" : "开启实时音频频谱")
+                            .accessibilityLabel("实时音频频谱")
+                            .accessibilityValue(spectrumEnabled ? "已开启" : "已关闭")
                         }
                         Spacer()
                         Circle().fill(playbackColor).frame(width: 5, height: 5)
@@ -398,7 +406,7 @@ struct NowPlayingView: View {
                     } else {
                         VStack(spacing: 10) {
                             Image(systemName: "waveform").font(.system(size: 28, weight: .light))
-                            Text("可在设置中开启实时频谱").font(.system(size: 11))
+                            Text("可通过上方开关开启实时频谱").font(.system(size: 11))
                         }.foregroundStyle(palette.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                     PlaybackProgress(palette: palette).padding(.top, 4).padding(.bottom, 12)
@@ -562,7 +570,6 @@ struct SettingsView: View {
     @Environment(\.colorScheme) var scheme
     @AppStorage("appearance") var appearance = "system"
     @AppStorage("accent") var accent = "blue"
-    @AppStorage("spectrumEnabled") var spectrumEnabled = true
     var palette: Palette { Palette(dark: scheme == .dark, accentName: accent) }
     let accents = [("blue", "冰川蓝"), ("mint", "薄荷绿"), ("lavender", "薰衣草紫"), ("coral", "暖珊瑚")]
     var body: some View {
@@ -596,14 +603,10 @@ struct SettingsView: View {
                     }
                 }
             }.padding(16).modifier(PanelStyle(palette: palette))
-            VStack(alignment: .leading, spacing: 10) {
-                Text("播放").font(.system(size: 11, weight: .semibold)).foregroundStyle(palette.secondary)
-                HStack { Text("显示实时音频频谱"); Spacer(); Toggle("显示实时音频频谱", isOn: $spectrumEnabled).labelsHidden().toggleStyle(.switch).controlSize(.small) }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(16).modifier(PanelStyle(palette: palette))
             Text("引用本地文件，不复制或修改原始音频。播放队列与统计自动保存。")
                 .font(.system(size: 11)).foregroundStyle(palette.secondary).lineSpacing(3)
             Spacer(minLength: 0)
-        }.font(.system(size: 12)).foregroundStyle(palette.text).padding(22).frame(width: 490, height: 390)
+        }.font(.system(size: 12)).foregroundStyle(palette.text).padding(22).frame(width: 490, height: 300)
             .background(LinearGradient(colors: [palette.sidebar, palette.background], startPoint: .topLeading, endPoint: .bottomTrailing))
             .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light).tint(palette.accent)
     }

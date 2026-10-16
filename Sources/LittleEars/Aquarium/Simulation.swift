@@ -1,6 +1,8 @@
 import Foundation
 import simd
 
+enum AquariumLayout { static let centerX: Float = 4.8 }
+
 struct ReefTriangle {
     let a: SIMD3<Float>, b: SIMD3<Float>, c: SIMD3<Float>
     var clearance: Float = 0
@@ -83,8 +85,8 @@ enum TankSimulationError: Error { case noClearSpawn(Int) }
 
 final class TankSimulation {
     let collider: ReefCollider
-    let lower = SIMD3<Float>(-6.9, -1.65, -1.65)
-    let upper = SIMD3<Float>(6.9, 4.1, 5.2)
+    let lower = SIMD3<Float>(AquariumLayout.centerX - 6.9, -1.65, -1.65)
+    let upper = SIMD3<Float>(AquariumLayout.centerX + 6.9, 4.1, 5.2)
     private(set) var swimmers: [Swimmer] = []
     private(set) var time: Float = 0
     private(set) var unresolvedContacts = 0
@@ -94,7 +96,7 @@ final class TankSimulation {
         // and height. Reject reef intersections and overlapping initial spheres.
         var candidates: [SIMD3<Float>] = []
         for z in 0..<5 { for y in 0..<6 { for x in 0..<13 {
-            candidates.append(SIMD3(Float(x) - 6, -0.6 + Float(y) * 0.8, -0.8 + Float(z) * 1.2))
+            candidates.append(SIMD3(Float(x) - 6 + AquariumLayout.centerX, -0.6 + Float(y) * 0.8, -0.8 + Float(z) * 1.2))
         } } }
         for (i, profile) in profiles.enumerated() {
             let radius = profile.collisionRadius
@@ -104,7 +106,7 @@ final class TankSimulation {
                       collider.contact(candidate, radius: radius + 0.06) == nil else { continue }
                 let separation = swimmers.map { simd_distance(candidate, $0.position) / (radius + $0.radius + 0.12) }.min()
                 guard separation == nil || separation! >= 1 else { continue }
-                let score = separation ?? -simd_distance(candidate, SIMD3(-3, 2.4, 3.6))
+                let score = separation ?? -simd_distance(candidate, SIMD3(AquariumLayout.centerX - 3, 2.4, 3.6))
                 if score > bestScore { best = candidate; bestScore = score }
             }
             guard let p = best else { throw TankSimulationError.noClearSpawn(i) }
@@ -128,7 +130,7 @@ final class TankSimulation {
             let p = fish.position, phase = fish.phase
             var acceleration = SIMD3<Float>(sin(time * 0.21 + phase) * 0.09, sin(time * 0.33 + phase) * 0.06, cos(time * 0.27 + phase) * 0.10)
             // A slowly moving home region keeps depth and height varied without fixed loops.
-            let home = SIMD3<Float>(sin(time * 0.055 + phase) * 4.8, 1.3 + sin(time * 0.1 + phase) * 1.5, 2.2 + cos(time * 0.07 + phase) * 2.2)
+            let home = SIMD3<Float>(AquariumLayout.centerX + sin(time * 0.055 + phase) * 4.8, 1.3 + sin(time * 0.1 + phase) * 1.5, 2.2 + cos(time * 0.07 + phase) * 2.2)
             acceleration += (home - p) * SIMD3(0.018, 0.065, 0.042)
             for axis in 0..<3 {
                 let margin: Float = fish.radius + 0.9

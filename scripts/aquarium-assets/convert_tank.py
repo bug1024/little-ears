@@ -14,36 +14,17 @@ from resource_format import Reader, child, decode_dds, mesh_data
 IDENTITY = [1.0 if i % 5 == 0 else 0.0 for i in range(16)]
 SCENE_SCALE = 0.70
 
-# Move complete reef groups together, including their support rocks. Keeping the
-# same translation for visible meshes, morph targets and colliders leaves a real
-# central swim channel without stretching the source geometry.
-REEF_OFFSETS = {
-    **{i: (-1.65, 0.0, -0.35) for i in [402, 403, 404, 421, 422, 424, 431, 435, 436]},
-    **{i: (2.0, 0.0, -0.8) for i in [413, 414]},
-    **{i: (1.35, 0.0, -0.35) for i in [400, 401, 412, 415, 416, 417, 420, 423, 425, 426, 427, 428, 429, 430, 434]},
-    **{i: (0.65, 0.0, 0.35) for i in [405, 406, 407]},
-    426: (2.3, 0.0, -0.8),
-    411: (-0.8, 0.0, -2.0),
-    438: (-2.55, 0.0, 0.15),
-}
-
-
-def reef_point(p, anchor, rid):
+# Apply one uniform coordinate conversion to the complete authored scene.
+# Independent cluster offsets would separate rocks from their connecting reef.
+def reef_point(p, rid):
     if rid == 299:
-        # The source star lies on local XZ, with positive Y thickness. Seat its
-        # lowest vertices just above the continuous sand, clear of the clams.
-        return [p[0] * 0.50 + 0.35, (p[1] - 0.025) * 0.50 - 2.225, 2.1 - p[2] * 0.50]
-    offset = REEF_OFFSETS.get(rid, (0.0, 0.0, 0.0))
-    if rid == 421 and p[0] > -2.0:
-        # This mesh includes a separate mushroom colony on the central support
-        # rock. Move that disconnected island with the support, not the carpet.
-        offset = REEF_OFFSETS[414]
-    return [v + d for v, d in zip(scene_point(p, anchor), offset)]
+        # The star is a local animal mesh, not a positioned scenery frame.
+        return [p[0] * 0.50 + 0.35, (p[1] - 0.025) * 0.50 - 2.18, 2.1 - p[2] * 0.50]
+    return scene_point(p)
 
 
-def scene_point(p, anchor):
-    # Preserve local shape proportions; compact the gaps between reef clusters.
-    return [(p[0] - anchor) * SCENE_SCALE + anchor * 0.42, p[1] * SCENE_SCALE + 0.2, 2.5 - p[2] * SCENE_SCALE]
+def scene_point(p):
+    return [p[0] * SCENE_SCALE, p[1] * SCENE_SCALE + 0.2, 2.5 - p[2] * SCENE_SCALE]
 
 
 def scene_motion(rid, name, points):
@@ -66,7 +47,7 @@ def scene_motion(rid, name, points):
         height = max(0.05, high[0] - low[0])
         kind, amplitude, frequency, phase = 5, 0.055, 0.8, 0.4
     elif rid == 299:
-        pivot = [0.35, -2.225, 2.1]
+        pivot = [0.35, -2.18, 2.1]
         kind, amplitude, frequency = 6, 0.004, 0.60
     return pivot + [height], [float(kind), amplitude, frequency, phase]
 
@@ -122,11 +103,7 @@ def build(source, output):
             raise ValueError("Missing texture: " + name)
         entry = texture_entries[key]
         w, h, rgba = decode_dds(read_entry(entry))
-        if key == "gravelfront.dds":
-            # Only the upper quarter is horizontal sand; tile it in both axes.
-            h //= 4
-            rgba = rgba[:w * h * 4]
-        elif key == "barnacles3.dds":
+        if key == "barnacles3.dds":
             # The bottom-left atlas strip is a numbered construction legend,
             # not an animal surface. It was occluded in the authored scene.
             clean = bytearray(rgba)
@@ -146,13 +123,6 @@ def build(source, output):
         bend_mesh = next((mesh_data(n["data"]) for n, _, _ in nodes if n["name"] == "fishbend"), None)
         bend = bend_mesh[0] if bend_mesh else None
         parts, collisions, margins = [], [], []
-        visible = [(n, m, p) for n, m, p in nodes if any(c["kind"] == "txtL" for c in n["children"])]
-        world_points = [point(v, m) for n, m, _ in visible for v in mesh_data(n["data"])[0]]
-        anchor = (min(p[0] for p in world_points) + max(p[0] for p in world_points)) * 0.5
-        if rid in [402, 403, 404, 438]: anchor = -3.2
-        if rid in [413, 414]: anchor = 2.8
-        if rid in [429, 430]: anchor = 11.7
-        if rid in [418, 419]: anchor = 0
         eel_target = next((mesh_data(n["data"]) for n, _, _ in nodes if n["name"] == "Mesh_MorayOpen"), None)
         mantle_target = next((mesh_data(n["data"])[0] for n, _, _ in nodes if n["name"] == "Mesh_Mantle3"), None)
         for n, matrix, path in nodes:
@@ -177,10 +147,6 @@ def build(source, output):
             if len(data) != 2 + count * 8 or count != len(positions) or len(normal_indices) != len(indices):
                 raise ValueError("Mesh/UV/normal topology mismatch")
             uvs = [struct.unpack_from(">2f", data, 2 + i * 8) for i in range(count)]
-            if rid == 418:
-                # Top sand occupies the first atlas strip; avoid wrapping its edge
-                # into unrelated vertical embankment strips after mip filtering.
-                uvs = [(u, min(0.245, max(0.006, v))) for u, v in uvs]
             material_node = child(n, "mtlL")
             material_count, face_count = struct.unpack_from(">HH", material_node["data"])
             face_materials = material_node["data"][4:]
@@ -189,8 +155,8 @@ def build(source, output):
                 raise ValueError("Material face table mismatch")
             transformed = [point(p, matrix) for p in positions]
             if scene:
-                # Authored left-handed reef -> right-handed compact observation tank.
-                transformed = [reef_point(p, anchor, rid) for p in transformed]
+                # Authored left-handed reef -> right-handed observation tank.
+                transformed = [reef_point(p, rid) for p in transformed]
             pivot, motion = scene_motion(rid, n["name"], transformed) if scene else ([0, 0, 0, 1], [0, 0, 0, 0])
             grouped = defaultdict(list)
             for face in range(face_count):
@@ -206,10 +172,10 @@ def build(source, output):
                     delta = [bend[index][i] - positions[index][i] for i in range(3)] if n["name"] == "fishbody" and bend else [0, 0, 0]
                     if scene and motion[0] == 3 and mantle_target:
                         if len(mantle_target) != len(positions): raise ValueError("Clam morph topology mismatch")
-                        target = reef_point(point(mantle_target[index], matrix), anchor, rid)
+                        target = reef_point(point(mantle_target[index], matrix), rid)
                         delta = [target[i] - transformed[index][i] for i in range(3)]
                     if scene and rid == 438:
-                        target = reef_point(point(eel_target[0][index], matrix), anchor, rid)
+                        target = reef_point(point(eel_target[0][index], matrix), rid)
                         delta = [target[i] - transformed[index][i] for i in range(3)]
                     part_id = 5 if n["name"] == "fishbody" else 0 if n["name"] == "eyes" else 1 if "fin" in n["name"] else 6
                     grouped[tex].append(transformed[index] + normal + list(uvs[index]) + delta + [part_id])
@@ -243,22 +209,12 @@ def build(source, output):
     if species_ids != list(range(300, 328)):
         raise ValueError("Expected complete fish catalog 300…327")
     species = [asset(i, False)[0] for i in species_ids]
-    # Preserve authored relative locations and per-frame transforms; dynamic specialty
-    # animals and baked shadow overlays are outside this phase.
-    scene_ids = [299, 438, 400, 401, 402, 403, 404, 405, 406, 407, 411, 412, 413, 414, 415, 416, 417, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431, 434, 435, 436]
+    # Preserve authored relative locations and per-frame transforms. Baked shadow
+    # overlays are replaced by the renderer's geometric shadow pass.
+    scene_ids = [299, 438, 400, 401, 402, 403, 404, 405, 406, 407, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431, 434, 435, 436]
     scenery, triangles, collision_margins = [], [], []
     for rid in scene_ids:
         a, c, m = asset(rid, True); scenery.append(a); triangles.extend(c); collision_margins.extend(m)
-    # Replace the original cut-to-fit floor and vertical front skirt with a
-    # continuous sand bed. Otherwise their exposed cutouts resemble a white wall
-    # in the new central channel. Slightly bury reef bases in the sand.
-    sand_vertices = []
-    sand_y = -2.24
-    corners = [[-35, sand_y, -45], [35, sand_y, -45], [-35, sand_y, 7], [35, sand_y, 7]]
-    for i in [0, 2, 1, 1, 2, 3]:
-        x, y, z = corners[i]
-        sand_vertices.append([x, y, z, 0, 1, 0, x / 3.8, z / 0.95, 0, 0, 0, 6])
-    scenery.insert(0, dict(id=-1, name="Sand foundation", bounds=[[-35, sand_y, -45], [35, sand_y, 7]], parts=[dict(name="Sand foundation", texture=texture("gravelfront.dds"), vertices=sand_vertices, sway=0, pivot=[0, 0, 0, 1], motion=[0, 0, 0, 0])]))
     sound = next(e for e in catalog if e["type"] == "sond" and e["id"] == 128)
     sound_path = read_entry(sound)
     with wave.open(str(sound_path)) as audio:
@@ -266,10 +222,11 @@ def build(source, output):
             raise ValueError("Unexpected bubble audio format")
     (output / "bubbles.wav").write_bytes(sound_path.read_bytes())
     texture("Lightplay.dds")
-    result = dict(species=species, scenery=scenery, textures=textures, collisionTriangles=triangles, collisionMargins=collision_margins, lightplayTexture=texture_index["lightplay.dds"])
+    bubble_texture = texture("bubbles.DDS")
+    result = dict(species=species, scenery=scenery, textures=textures, collisionTriangles=triangles, collisionMargins=collision_margins, lightplayTexture=texture_index["lightplay.dds"], bubbleTexture=bubble_texture)
     (output / "fish-species.json").write_text(json.dumps([{k: a[k] for k in ["id", "name", "bounds", "spawnScale", "collisionRadius"]} for a in species], indent=2))
     (output / "tank.json").write_text(json.dumps(result, separators=(",", ":")))
-    stats = dict(species=[s["name"] for s in species], sceneObjects=len(scenery), textures=len(textures), triangles=sum(len(p["vertices"]) // 3 for a in scenery for p in a["parts"]), collisionTriangles=len(triangles) // 3, sourceAssets=manifest, limitations=["Local exploration assets only", "Reef cluster spacing remapped, local shape proportions preserved", "Soft coral, clam and feather-duster motion are new approximations; original simulation is not restored"])
+    stats = dict(species=[s["name"] for s in species], sceneObjects=len(scenery), textures=len(textures), triangles=sum(len(p["vertices"]) // 3 for a in scenery for p in a["parts"]), collisionTriangles=len(triangles) // 3, sourceAssets=manifest, limitations=["Local exploration assets only", "Authored reef and seabed retain their relative positions under one uniform transform", "Soft coral, clam and feather-duster motion are new approximations; original simulation is not restored"])
     (output / "tank-conversion.json").write_text(json.dumps(stats, indent=2))
     print(json.dumps({k: v for k, v in stats.items() if k != "sourceAssets"}, indent=2))
 

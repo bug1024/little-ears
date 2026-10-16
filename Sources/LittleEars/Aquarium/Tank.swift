@@ -5,7 +5,7 @@ import simd
 struct TankPart: Decodable { let name: String; let texture: Int; let vertices: [[Float]]; let sway: Float; let pivot: [Float]; let motion: [Float] }
 struct TankAsset: Decodable { let id: Int; let name: String; let parts: [TankPart]; let bounds: [[Float]]; let spawnScale: Float?; let collisionRadius: Float? }
 struct TankTexture: Decodable { let name: String; let file: String; let width: Int; let height: Int; let transparent: Bool }
-struct TankData: Decodable { let species: [TankAsset]; let scenery: [TankAsset]; let textures: [TankTexture]; let collisionTriangles: [[Float]]; let collisionMargins: [Float]; let lightplayTexture: Int }
+struct TankData: Decodable { let species: [TankAsset]; let scenery: [TankAsset]; let textures: [TankTexture]; let collisionTriangles: [[Float]]; let collisionMargins: [Float]; let lightplayTexture: Int; let bubbleTexture: Int? }
 struct TankUniforms {
     var model: simd_float4x4
     var viewProjection: simd_float4x4
@@ -27,6 +27,7 @@ final class TankRenderer: NSObject, MTKViewDelegate {
     let solidPipeline: MTLRenderPipelineState
     let alphaPipeline: MTLRenderPipelineState
     let backgroundPipeline: MTLRenderPipelineState
+    let bubblePipeline: MTLRenderPipelineState
     let particlePipeline: MTLRenderPipelineState
     let jellyPipeline: MTLRenderPipelineState
     let shadowPipeline: MTLRenderPipelineState
@@ -47,7 +48,7 @@ final class TankRenderer: NSObject, MTKViewDelegate {
     var bubbles = true
     var backgroundMotion = true
     var blueBackdrop = false
-    let cameraPosition = SIMD3<Float>(0, 1.55, 22)
+    let cameraPosition = SIMD3<Float>(AquariumLayout.centerX, 1.0, 22)
     private var last = ProcessInfo.processInfo.systemUptime
 
     init(assets: URL, shader: URL, shadowResolution: Int = 2048, population: [Int: Int]? = nil) throws {
@@ -85,6 +86,7 @@ final class TankRenderer: NSObject, MTKViewDelegate {
         solidPipeline = try pipeline("tankVertex", "tankFragment", false)
         alphaPipeline = try pipeline("tankVertex", "tankFragment", true)
         backgroundPipeline = try pipeline("backgroundVertex", "tankBackground", false)
+        bubblePipeline = try pipeline("bubbleColumnVertex", "bubbleColumnFragment", true)
         particlePipeline = try pipeline("particleVertex", "particleFragment", true)
         jellyPipeline = try pipeline("moonJellyVertex", "moonJellyFragment", true)
         let depth = MTLDepthStencilDescriptor(); depth.depthCompareFunction = .less; depth.isDepthWriteEnabled = true
@@ -134,7 +136,7 @@ final class TankRenderer: NSObject, MTKViewDelegate {
     }
 
     var lightProjection: simd_float4x4 {
-        let eye = SIMD3<Float>(-9, 16, 10), forward = simd_normalize(-SIMD3<Float>(-9, 16, 10))
+        let eye = SIMD3<Float>(AquariumLayout.centerX - 9, 16, 10), forward = simd_normalize(-SIMD3<Float>(-9, 16, 10))
         let right = simd_normalize(simd_cross(forward, SIMD3<Float>(0, 1, 0)))
         let up = simd_cross(right, forward)
         let view = simd_float4x4(rows: [SIMD4(right, -simd_dot(right, eye)), SIMD4(up, -simd_dot(up, eye)), SIMD4(-forward, simd_dot(forward, eye)), SIMD4(0, 0, 0, 1)])
@@ -167,7 +169,7 @@ final class TankRenderer: NSObject, MTKViewDelegate {
         e.setCullMode(.none); e.setTriangleFillMode(.fill)
         e.setFragmentTexture(textures[data.lightplayTexture], index: 1)
         func draw(_ batch: TankBatch, _ uniform: TankUniforms) {
-            var uniform = uniform; uniform.detail.x = batch.sway
+            var uniform = uniform; uniform.detail.x = batch.assetID == 418 ? -1 : batch.sway
             uniform.pivot = batch.pivot; uniform.motion = batch.motion
             e.setRenderPipelineState(shadowPass ? shadowPipeline : batch.fin ? alphaPipeline : solidPipeline)
             e.setDepthStencilState(!shadowPass && batch.fin ? depthRead : depthWrite)
@@ -205,13 +207,22 @@ final class TankRenderer: NSObject, MTKViewDelegate {
             e.setVertexBytes(&u, length: MemoryLayout<TankUniforms>.stride, index: 1)
             e.setFragmentBytes(&u, length: MemoryLayout<TankUniforms>.stride, index: 1)
             // Three parametric meshes per animal: bell, four oral arms, short marginal fringe.
-            e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: (2 * 48 * 96 + 4 * 64 * 16 + 96 * 8) * 6, instanceCount: min(5, moonJellyCount))
+            for index in [2, 4, 0, 3, 1] where index < min(5, moonJellyCount) {
+                e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: (2 * 48 * 96 + 4 * 64 * 16 + 96 * 8) * 6, instanceCount: 1, baseInstance: index)
+            }
         }
         if bubbles && !shadowPass {
             u.model = matrix_identity_float4x4
+            e.setRenderPipelineState(bubblePipeline); e.setDepthStencilState(depthRead)
+            e.setVertexBytes(&u, length: MemoryLayout<TankUniforms>.stride, index: 1)
+            e.setFragmentBytes(&u, length: MemoryLayout<TankUniforms>.stride, index: 1)
+            e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 160)
+        }
+        if !shadowPass {
+            u.model = matrix_identity_float4x4
             e.setTriangleFillMode(.fill); e.setRenderPipelineState(particlePipeline); e.setDepthStencilState(depthRead)
             e.setVertexBytes(&u, length: MemoryLayout<TankUniforms>.stride, index: 1)
-            e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 46)
+            e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 16)
         }
     }
 

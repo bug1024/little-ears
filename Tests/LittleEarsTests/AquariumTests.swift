@@ -37,6 +37,30 @@ final class AquariumTests: XCTestCase {
         XCTAssertGreaterThan(changed(b, empty), 5000, "Jellies must actually contribute visible pixels")
 
     }
+    func testOptionalDiscreteBubblesAreCentralSparseAndAnimated() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let assets = root.appendingPathComponent("build/Little Ears.app/Contents/Resources/AquariumAssets")
+        guard MTLCreateSystemDefaultDevice() != nil, FileManager.default.fileExists(atPath: assets.appendingPathComponent("tank.json").path) else { throw XCTSkip("Local assets unavailable") }
+        let renderer = try TankRenderer(assets: assets, shader: AquariumResources.shader, population: [:])
+        let first = try XCTUnwrap(renderer.offscreen(width: 640, height: 360))
+        renderer.simulation.synchronizeClock(to: 1.3)
+        let next = try XCTUnwrap(renderer.offscreen(width: 640, height: 360))
+        renderer.bubbles = false
+        let off = try XCTUnwrap(renderer.offscreen(width: 640, height: 360))
+        func changes(_ a: CGImage, _ b: CGImage, central: Bool) -> Int {
+            let lhs = a.dataProvider!.data! as Data, rhs = b.dataProvider!.data! as Data
+            var count = 0
+            for y in 0..<180 { for x in 0..<640 where ((300..<390).contains(x)) == central {
+                let i = y * a.bytesPerRow + x * 4
+                if (0..<3).contains(where: { abs(Int(lhs[i + $0]) - Int(rhs[i + $0])) > 3 }) { count += 1 }
+            } }
+            return count
+        }
+        XCTAssertGreaterThan(changes(next, off, central: true), 30)
+        XCTAssertLessThan(changes(next, off, central: true), 1500, "Bubbles must remain discrete, leaving clear water between them")
+        XCTAssertEqual(changes(next, off, central: false), 0)
+        XCTAssertGreaterThan(changes(first, next, central: true), 30)
+    }
     @MainActor
     func testOutgoingViewCannotStealIncomingSurfaceBinding() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("Metal unavailable") }
@@ -107,6 +131,11 @@ final class AquariumTests: XCTestCase {
     @MainActor
     func testImmersionControlsStayVisibleDuringInteraction() {
         let hud = AquariumImmersiveHUD()
+        XCTAssertFalse(hud.visible)
+        hud.beginSession(at: 1)
+        XCTAssertFalse(hud.visible)
+        hud.setHovering(false, at: 2)
+        XCTAssertFalse(hud.visible) // An initial hover-exit must not flash the HUD.
         hud.recordActivity(at: 10)
         hud.hideIfIdle(at: 12.9); XCTAssertTrue(hud.visible)
         hud.hideIfIdle(at: 13); XCTAssertFalse(hud.visible)
@@ -116,6 +145,11 @@ final class AquariumTests: XCTestCase {
         hud.setHovering(false, at: 101)
         hud.hideIfIdle(at: 103); XCTAssertTrue(hud.visible)
         hud.hideIfIdle(at: 104); XCTAssertFalse(hud.visible)
+        hud.recordActivity(at: 105)
+        hud.beginSession(at: 106)
+        XCTAssertFalse(hud.visible) // Re-entering fullscreen starts hidden again.
+        hud.beginSession(accessibilityVisible: true, at: 107)
+        XCTAssertTrue(hud.visible)
     }
     @MainActor
     func testAmbientShortcutPersistsWithoutChangingOtherSettings() {
@@ -254,5 +288,14 @@ final class AquariumTests: XCTestCase {
         XCTAssertNotNil(try renderer.offscreen(width: 320, height: 240))
         XCTAssertEqual(renderer.shadowMap.width, 1024)
         try renderer.resizeShadowMap(to: 2048); XCTAssertEqual(renderer.shadowMap.width, 2048)
+        // The restored, denser reef must still admit every species and the full population.
+        for count in [28, 40] {
+            let indices = (0..<count).map { $0 % renderer.data.species.count }
+            let profiles = indices.map { FishProfile(spawnScale: renderer.data.species[$0].spawnScale!, collisionRadius: renderer.data.species[$0].collisionRadius!) }
+            let simulation = try TankSimulation(collider: renderer.simulation.collider, profiles: profiles, speciesIndices: indices)
+            XCTAssertEqual(simulation.swimmers.count, count)
+            for _ in 0..<90 { simulation.step(1 / 60) }
+            XCTAssertEqual(simulation.unresolvedContacts, 0)
+        }
     }
 }

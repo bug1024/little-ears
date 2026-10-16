@@ -41,18 +41,20 @@ struct AquariumSettingsPanel: View {
                                             Spacer()
                                             Text("\(draft.fishCounts[species.id] ?? 0)").monospacedDigit().frame(width: 20)
                                             Stepper(species.name, value: countBinding(species.id), in: 0...min(3, AquariumConfiguration.maximumFish - draft.totalFish + (draft.fishCounts[species.id] ?? 0)))
-                                                .labelsHidden().accessibilityLabel("\(species.name) 数量")
+                                                .labelsHidden().fixedSize().accessibilityLabel("\(species.name) 数量")
                                         }.frame(height: 28).padding(.horizontal, 4)
                                         Divider()
                                     }
                                 }
+                                // Overlay scrollers must not cover the native stepper's hit area.
+                                .padding(.trailing, 20)
                             }.frame(height: 205)
                             HStack { Toggle("洞穴海鳗", isOn: $draft.showMoray); Spacer(); Toggle("沙地海星", isOn: $draft.showStarfish) }
                         }.padding(8)
                     }
                     GroupBox("画面") {
                         VStack(spacing: 10) {
-                            HStack { Text("背板"); Spacer(); Picker("背板", selection: $draft.blueBackdrop) { Text("蓝黑").tag(false); Text("纯蓝").tag(true) }.labelsHidden().pickerStyle(.segmented).frame(width: 190) }
+                            HStack { Text("背板"); Spacer(); Picker("背板", selection: $draft.blueBackdrop) { Text("清透蓝绿").tag(false); Text("纯蓝").tag(true) }.labelsHidden().pickerStyle(.segmented).frame(width: 190) }
                             HStack { Toggle("气泡", isOn: $draft.bubbles); Spacer(); Toggle("水波光纹", isOn: $draft.caustics) }
                             HStack { Text("绘制质量"); Spacer(); Picker("绘制质量", selection: $draft.energySaving) { Text("标准 · 30 fps").tag(false); Text("省电 · 24 fps").tag(true) }.labelsHidden().frame(width: 190) }
                         }.padding(8)

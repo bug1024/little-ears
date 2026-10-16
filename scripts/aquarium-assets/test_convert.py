@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from resource_format import Reader, decode_dds, decode_dxt3, mesh_data
-from convert_tank import matrix_mul, point, IDENTITY, scene_point, scene_motion, build
+from convert_tank import matrix_mul, point, IDENTITY, reef_point, scene_point, scene_motion, build
 
 
 class ConversionTests(unittest.TestCase):
@@ -49,19 +49,30 @@ class ConversionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             build(source, Path(folder))
             data = json.loads((Path(folder) / "tank.json").read_text())
+            bubble = data["textures"][data["bubbleTexture"]]
+            source_catalog = json.loads((source / "resource-catalog.json").read_text())
+            bubble_entry = next(e for e in source_catalog if e["type"] == ".dds" and e["id"] == 419)
+            _, _, original_bubbles = decode_dds(source / bubble_entry["local_path"])
+            self.assertEqual((Path(folder) / bubble["file"]).read_bytes(), original_bubbles)
             import wave
             sound = Path(folder) / "bubbles.wav"
             self.assertEqual(sound.read_bytes(), (source / "extracted/sounds/128_unnamed.bin").read_bytes())
             with wave.open(str(sound)) as audio:
                 self.assertEqual((audio.getnchannels(), audio.getsampwidth(), audio.getframerate(), audio.getnframes()), (2, 2, 22050, 167422))
+        bubble = data["textures"][data["bubbleTexture"]]
+        self.assertEqual((bubble["name"], bubble["width"], bubble["height"]), ("bubbles.DDS", 128, 256))
+        self.assertTrue(bubble["transparent"])
         self.assertEqual([a["id"] for a in data["species"]], list(range(300, 328)))
         scenery = {a["id"]: a for a in data["scenery"]}
+        self.assertIn(418, scenery)
+        self.assertIn(419, scenery)
+        self.assertNotIn(-1, scenery)
         star, eel = scenery[299], scenery[438]
         self.assertEqual({p["name"] for p in star["parts"]}, {"arm1", "arm2", "arm3", "arm4", "arm5"})
         self.assertTrue(all(p["motion"][0] == 6 for p in star["parts"]))
         # Arm flex only lifts tips; the lowest rest vertices already clear sand.
-        self.assertGreater(star["bounds"][0][1], scenery[-1]["bounds"][0][1])
-        self.assertLess(star["bounds"][1][1], -1.95)
+        self.assertGreater(star["bounds"][0][1], scenery[418]["bounds"][0][1])
+        self.assertLess(star["bounds"][1][1], -1.90)
         self.assertEqual(len(eel["parts"]), 1)  # Mouth target must not be drawn twice.
         self.assertEqual(eel["parts"][0]["motion"][0], 5)
         self.assertTrue(any(sum(x*x for x in v[8:11]) > 0.01 for v in eel["parts"][0]["vertices"]))
@@ -98,11 +109,12 @@ class ConversionTests(unittest.TestCase):
         local = IDENTITY.copy(); local[0] = 2; local[12] = 3
         self.assertEqual(point([1, 2, 3], matrix_mul(local, parent)), [15, 22, 33])
 
-    def test_cluster_remap_preserves_shape_proportions(self):
+    def test_uniform_scene_transform_preserves_authored_spacing(self):
         import math
-        base = scene_point([4, 2, 3], 8)
+        self.assertEqual(reef_point([4, 2, 3], 402), reef_point([4, 2, 3], 414))
+        base = scene_point([4, 2, 3])
         for offset in [[5, 2, 3], [4, 3, 3], [4, 2, 4]]:
-            p = scene_point(offset, 8)
+            p = scene_point(offset)
             self.assertAlmostEqual(math.dist(p, base), 0.7)
 
     def test_soft_coral_has_local_root_and_independent_phase(self):

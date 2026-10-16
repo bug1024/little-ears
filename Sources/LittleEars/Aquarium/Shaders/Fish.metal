@@ -2,60 +2,13 @@
 using namespace metal;
 
 struct Vertex { packed_float3 position; packed_float3 normal; packed_float2 uv; packed_float3 bend; float part; };
-struct Uniforms { float4x4 model; float4x4 viewProjection; float4 options; };
-struct Raster { float4 position [[position]]; float3 world; float3 normal; float2 uv; };
-
-vertex Raster fishVertex(uint id [[vertex_id]], const device Vertex *vertices [[buffer(0)]], constant Uniforms &u [[buffer(1)]]) {
-    Vertex v = vertices[id];
-    float3 p = float3(v.position);
-    float time = u.options.x;
-    if (u.options.y > 0.5) {
-        if (v.part > 4.5) {
-            // Local proof of conversion: original morph, with new bounded timing.
-            p += float3(v.bend) * sin(time * 4.5) * 0.12;
-            float tail = smoothstep(0.03, 0.5, p.x);
-            p.z += tail * sin(time * 4.5 - p.x * 6.0) * 0.028;
-        } else if (v.part > 0.5) {
-            float side = p.z < 0 ? -1.0 : 1.0;
-            p.z += side * abs(p.z) * sin(time * 7.0 + v.part * 0.8) * 0.20;
-        }
-    }
-    float4 world = u.model * float4(p, 1.0);
-    Raster r;
-    r.world = world.xyz;
-    r.position = u.viewProjection * world;
-    r.normal = (u.model * float4(float3(v.normal), 0.0)).xyz;
-    r.uv = float2(v.uv.x, u.options.w > 0.5 ? 1.0 - v.uv.y : v.uv.y);
-    return r;
-}
-
-fragment float4 fishFragment(Raster r [[stage_in]], texture2d<float> skin [[texture(0)]]) {
-    constexpr sampler s(address::repeat, filter::linear, mip_filter::linear);
-    float4 color = skin.sample(s, r.uv);
-    if (color.a < 0.08) discard_fragment();
-    float3 geometric = normalize(cross(dfdx(r.world), dfdy(r.world)));
-    float3 normal = length(r.normal) > 0.1 ? normalize(r.normal) : geometric;
-    float3 view = normalize(float3(0, 0, 2.6) - r.world);
-    if (dot(normal, view) < 0) normal = -normal;
-    float diffuse = max(dot(normal, normalize(float3(-0.4, 0.7, 1.0))), 0.0);
-    float rim = pow(1.0 - max(dot(normal, view), 0.0), 3.0);
-    float3 rgb = color.rgb * (0.45 + diffuse * 0.65) + float3(0.07, 0.12, 0.14) * rim;
-    return float4(rgb, color.a);
-}
-
 struct Background { float4 position [[position]]; float2 uv; };
 vertex Background backgroundVertex(uint id [[vertex_id]]) {
     float2 p = float2((id << 1) & 2, id & 2);
     return {float4(p * 2.0 - 1.0, 0.999, 1.0), p};
 }
-fragment float4 backgroundFragment(Background r [[stage_in]]) {
-    float2 p = r.uv;
-    float glow = exp(-dot((p - float2(0.45, 0.6)) * float2(1.3, 1.0), (p - float2(0.45, 0.6)) * float2(1.3, 1.0)) * 3.0);
-    return float4(float3(0.003, 0.009, 0.015) + glow * float3(0.008, 0.035, 0.046), 1.0);
-}
-
 struct TankUniforms { float4x4 model; float4x4 viewProjection; float4 options; float4 water; float4 camera; float4 detail; float4 pivot; float4 motion; float4x4 lightProjection; };
-struct TankRaster { float4 position [[position]]; float3 world; float3 normal; float2 uv; };
+struct TankRaster { float4 position [[position]]; float3 world; float3 normal; float2 uv; float sand [[flat]]; float eye [[flat]]; };
 
 vertex TankRaster tankVertex(uint id [[vertex_id]], const device Vertex *vertices [[buffer(0)]], constant TankUniforms &u [[buffer(1)]]) {
     Vertex v = vertices[id]; float3 p = float3(v.position), normal = float3(v.normal);
@@ -113,7 +66,8 @@ vertex TankRaster tankVertex(uint id [[vertex_id]], const device Vertex *vertice
         }
     }
     float4 world = u.model * float4(p, 1.0);
-    return {u.viewProjection * world, world.xyz, (u.model * float4(normal, 0)).xyz, float2(v.uv)};
+    float3 squaredScale=float3(dot(u.model[0].xyz,u.model[0].xyz),dot(u.model[1].xyz,u.model[1].xyz),dot(u.model[2].xyz,u.model[2].xyz));
+    return {u.viewProjection * world, world.xyz, (u.model * float4(normal/max(squaredScale,float3(0.001)), 0)).xyz, float2(v.uv), u.detail.x < -0.5 ? 1.0 : 0.0, v.part < 0.5 && u.options.z < 0.5 ? 1.0 : 0.0};
 }
 
 fragment void tankShadow(TankRaster r [[stage_in]], texture2d<float> skin [[texture(0)]]) {
@@ -121,7 +75,7 @@ fragment void tankShadow(TankRaster r [[stage_in]], texture2d<float> skin [[text
     if (skin.sample(s, r.uv).a < 0.35) discard_fragment();
 }
 
-float shadowVisibility(float3 world, float3 normal, constant TankUniforms &u, depth2d<float> map) {
+float shadowVisibility(float3 world, float3 normal, constant TankUniforms &u, depth2d<float> map, bool sand) {
     if (u.detail.w < 1.5) return 1.0;
     float4 clip = u.lightProjection * float4(world, 1);
     float3 ndc = clip.xyz / clip.w;
@@ -129,11 +83,26 @@ float shadowVisibility(float3 world, float3 normal, constant TankUniforms &u, de
     if (any(uv < 0.0) || any(uv > 1.0) || ndc.z < 0.0 || ndc.z > 1.0) return 1.0;
     constexpr sampler comparison(coord::normalized, address::clamp_to_edge, filter::linear, compare_func::less_equal);
     float slope = 1.0 - max(dot(normal, normalize(float3(-9, 16, 10))), 0.0);
-    float depth = ndc.z - (0.0003 + slope * 0.0008);
+    float depth = ndc.z - (0.00022 + slope * 0.0007);
     float visibility = 0;
-    for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++)
-        visibility += map.sample_compare(comparison, uv + float2(x, y) * 1.7 / float2(map.get_width(), map.get_height()), depth);
-    return visibility / 9.0;
+    int radius=sand ? 2 : 1;
+    float spacing=sand ? 8.0 : 2.3;
+    for (int y=-radius; y<=radius; y++) for (int x=-radius; x<=radius; x++)
+        visibility+=map.sample_compare(comparison,uv+float2(x,y)*spacing/float2(map.get_width(),map.get_height()),depth);
+    return visibility/float((radius*2+1)*(radius*2+1));
+}
+
+float3 waterBacking(float height, constant TankUniforms &u) {
+    // Bright display-aquarium backing: clear sky blue above, soft turquoise below.
+    float3 bottom=u.water.z>0.5 ? float3(0.045,0.20,0.36) : float3(0.042,0.20,0.18);
+    float3 top=u.water.z>0.5 ? float3(0.17,0.40,0.82) : float3(0.18,0.44,0.86);
+    return mix(bottom,top,smoothstep(0.0,1.0,height));
+}
+float3 immerseInWater(float3 rgb, float3 world, constant TankUniforms &u) {
+    // Clear foreground; only the most distant surfaces have a trace of haze.
+    float distance=max(0.0,length(u.camera.xyz-world)-24.0);
+    float haze=min(0.12,1.0-exp(-distance*0.012));
+    return mix(rgb,waterBacking(clamp((world.y+2.3)/7.0,0.0,1.0),u),haze);
 }
 
 fragment float4 tankFragment(TankRaster r [[stage_in]], constant TankUniforms &u [[buffer(1)]], texture2d<float> skin [[texture(0)]], texture2d<float> caustic [[texture(1)]], depth2d<float> shadowMap [[texture(2)]]) {
@@ -142,6 +111,7 @@ fragment float4 tankFragment(TankRaster r [[stage_in]], constant TankUniforms &u
     // Alpha cutout writes correct reef depth; very low alpha fringe is removed.
     if (color.a < 0.20) discard_fragment();
     float3 n = length(r.normal) > 0.01 ? normalize(r.normal) : normalize(cross(dfdx(r.world), dfdy(r.world)));
+    bool sand = r.sand > 0.5;
     float3 eye = normalize(u.camera.xyz - r.world);
     if (dot(n, eye) < 0) n = -n;
     float diffuse = max(dot(n, normalize(float3(-0.3, 0.85, 0.5))), 0.0);
@@ -152,68 +122,102 @@ fragment float4 tankFragment(TankRaster r [[stage_in]], constant TankUniforms &u
     float light = fish ? 0.68 + diffuse * 0.43 : 0.86 + diffuse * 0.34;
     float3 fill = mix(float3(0.88, 0.95, 0.97), float3(0.96, 1.0, 1.0), sky);
     float3 rgb = color.rgb * light * fill;
+    float visibility = shadowVisibility(r.world,n,u,shadowMap,sand);
     if (u.detail.w > 0.5) {
         float3 key = normalize(float3(-9, 16, 10));
         float keyDiffuse = max(dot(n, key), 0.0);
-        float visibility = shadowVisibility(r.world, n, u, shadowMap);
         // Bright water stays bright, while directional light describes volume.
-        float ambient = fish ? 0.40 + sky * 0.16 : 0.48 + sky * 0.17;
-        float direct = (fish ? 0.83 : 0.72) * keyDiffuse * visibility;
+        float ambient = fish ? 0.58 : 0.55 + sky * 0.16;
+        float fishDiffuse=max(dot(n,normalize(float3(-0.30,0.45,0.84))),0.0)*0.62;
+        float direct = fish ? fishDiffuse*(0.80+0.20*visibility) : 0.65*keyDiffuse*(sand ? 0.35+0.65*visibility : visibility);
         float3 ambientColor = mix(float3(0.84, 0.89, 0.95), float3(0.96, 0.98, 1.0), sky);
-        rgb = color.rgb * (ambient * ambientColor + direct * float3(1.0, 0.99, 0.96));
+        rgb = fish ? color.rgb*(ambient+direct) : color.rgb*(ambient*ambientColor+direct*float3(1.0,0.99,0.96));
         // Broad, restrained wet sheen follows the actual interpolated normals.
         float3 halfVector = normalize(key + eye);
         float fresnel = 0.025 + 0.10 * pow(1.0 - max(dot(n, eye), 0.0), 5.0);
-        float specular = pow(max(dot(n, halfVector), 0.0), fish ? 42.0 : 20.0);
-        rgb += float3(0.83, 0.95, 1.0) * specular * (fish ? 0.24 + fresnel : 0.018) * visibility * smoothstep(0.0, 0.2, keyDiffuse);
+        float specular = pow(max(dot(n, halfVector), 0.0), fish ? (r.eye > 0.5 ? 64.0 : 42.0) : 20.0);
+        rgb += float3(0.83, 0.95, 1.0) * specular * (fish ? (r.eye > 0.5 ? 0.40 : 0.025 + fresnel*0.15) : 0.018) * visibility * smoothstep(0.0, 0.2, keyDiffuse);
     }
     if (u.options.w > 0.5) {
         float t = u.options.x;
-        float a = caustic.sample(s, r.world.xz * 0.31 + float2(t * 0.032, t * 0.019)).r;
-        float b = caustic.sample(s, r.world.xy * 0.25 + float2(-t * 0.023, t * 0.016)).r;
-        // Source DDS peaks at 90/255 sRGB (~0.10 linear); old 0.15 threshold erased it.
-        float pattern = max(smoothstep(0.006, 0.065, a), smoothstep(0.009, 0.070, b) * 0.75);
-        rgb *= 0.98 + pattern * (fish ? 0.16 : 0.18 + max(n.y, 0.0) * 0.14);
+        float2 warp=float2(sin(r.world.z*0.63+t*0.11),cos(r.world.x*0.51-t*0.09))*0.07;
+        float2 projected=r.world.xz*0.29+r.world.y*float2(0.045,0.025)+warp;
+        float a=caustic.sample(s, projected+float2(t*0.018,t*0.011)).r;
+        float b=caustic.sample(s, projected*1.19+float2(-t*0.013,t*0.008)+0.37).r;
+        float pattern=smoothstep(0.009,0.073,max(a,b*0.82));
+        float topFacing=0.22+0.78*max(0.0,n.y);
+        float strength=fish ? 0.105 : sand ? 0.18 : 0.13;
+        // Caustics follow the same projected light field across fish and reef.
+        // Shadowed surfaces and vertical faces receive much less moving light.
+        if (fish) {
+            // Original Fish.frag adds two lightplay samples, weighted by vertex
+            // diffuse, rather than multiplying the skin by a brightening mask.
+            float3 lightplayCoord=r.world*float3(0.29,0.25,0.29)+float3(t*0.018,t*0.011,-t*0.013);
+            float3 lightplay=caustic.sample(s,lightplayCoord.xy).rgb+caustic.sample(s,lightplayCoord.zx).rgb;
+            float diffuse=max(dot(n,normalize(float3(-0.30,0.45,0.84))),0.0)*0.62;
+            rgb+=lightplay*diffuse*0.85;
+        } else {
+            rgb *= 0.985 + pattern*strength*topFacing*visibility;
+        }
     }
-    // Observation tank: near water is clear. Only the far sand/background
-    // transition fades gently toward the backing panel, not a green ocean haze.
-    float distance = max(0.0, -3.0 - r.world.z);
-    float fog = (1.0 - exp(-distance * 0.085)) * u.detail.y;
-    float3 waterColor = u.water.z > 0.5 ? float3(0.009, 0.035, 0.11) : float3(0.005, 0.012, 0.029);
-    rgb = mix(rgb, waterColor, fog);
+    // Gentle highlight compression keeps pale coral tissue from clipping.
+    rgb=rgb/(1.0+max(float3(0),rgb-0.75)*0.18);
+    rgb=immerseInWater(rgb,r.world,u);
     return float4(rgb, fish ? color.a : 1.0);
 }
 
 fragment float4 tankBackground(Background r [[stage_in]], constant TankUniforms &u [[buffer(1)]]) {
-    float2 p = r.uv;
-    float3 bottom = u.water.z > 0.5 ? float3(0.008, 0.028, 0.09) : float3(0.004, 0.009, 0.022);
-    float3 top = u.water.z > 0.5 ? float3(0.018, 0.075, 0.22) : float3(0.009, 0.022, 0.052);
-    float3 base = mix(bottom, top, smoothstep(0.0, 1.0, p.y));
-    float3 surfaceLight = float3(0.003, 0.006, 0.012) * exp(-pow((p.x - 0.36) * 1.8, 2.0)) * pow(p.y, 3.0);
-    base += surfaceLight;
-    float rays = pow(max(0.0, sin(p.x * 13.0 + (1.0 - p.y) * 2.0 + sin(u.options.x * 0.09) * 0.3)), 10.0);
-    if (u.options.w > 0.5) base += rays * pow(p.y, 2.5) * float3(0.001, 0.002, 0.004);
-    float vignette = smoothstep(0.85, 0.1, length((p - 0.5) * float2(1.1, 0.8)));
-    return float4(base * (0.94 + vignette * 0.06), 1);
+    return float4(waterBacking(r.uv.y,u),1);
 }
 
-struct WaterParticle { float4 position [[position]]; float2 uv; float alpha; float bubble; };
+// Discrete transparent bubbles, rather than a repeated sheet of dense foam.
+struct BubbleColumnRaster { float4 position [[position]]; float2 uv; float3 world; float fade; };
+float bubbleHash(float seed) { return fract(sin(seed*127.1+311.7)*43758.5453); }
+vertex BubbleColumnRaster bubbleColumnVertex(uint id [[vertex_id]], uint instance [[instance_id]], constant TankUniforms &u [[buffer(1)]]) {
+    const float2 corners[]={float2(-1,-1),float2(1,-1),float2(-1,1),float2(-1,1),float2(1,-1),float2(1,1)};
+    float2 uv=corners[id];
+    float seed=float(instance)+1.0, t=u.options.x;
+    float speed=mix(0.24,0.40,bubbleHash(seed+7.0));
+    float height=fract(bubbleHash(seed)+t*speed/8.25);
+    float y=mix(-2.25,6.0,height);
+    float spread=mix(0.11,0.35,height);
+    float x=u.camera.x+0.5+(bubbleHash(seed+3.0)*2.0-1.0)*spread;
+    x+=sin(t*0.65+seed*2.4+y)*0.035;
+    float z=-1.4+(bubbleHash(seed+11.0)-0.5)*0.45;
+    // Most bubbles are tiny; a few larger ones provide recognizable glassy rims.
+    float radius=mix(0.016,0.046,pow(bubbleHash(seed+19.0),2.0))*(0.88+height*0.22);
+    float3 world=float3(x,y,z)+float3(uv*float2(radius,radius*0.94),0);
+    float fade=smoothstep(0.0,0.035,height)*(1.0-smoothstep(0.97,1.0,height));
+    return {u.viewProjection*float4(world,1),uv,world,fade};
+}
+fragment float4 bubbleColumnFragment(BubbleColumnRaster r [[stage_in]], constant TankUniforms &u [[buffer(1)]]) {
+    float d=length(r.uv);
+    float aa=max(fwidth(d),0.025);
+    float coverage=1.0-smoothstep(1.0-aa,1.0+aa,d);
+    if (coverage<0.001) discard_fragment();
+    float rim=exp(-pow((d-0.80)/0.13,2.0));
+    float glint=exp(-dot(r.uv-float2(-0.32,0.49),r.uv-float2(-0.32,0.49))*32.0);
+    float lower=exp(-dot(r.uv-float2(0.23,-0.65),r.uv-float2(0.23,-0.65))*20.0);
+    float litSide=0.5+0.5*dot(normalize(r.uv+0.0001),normalize(float2(-0.6,0.8)));
+    float3 rgb=mix(float3(0.16,0.35,0.40),float3(0.78,0.92,0.97),litSide);
+    rgb=mix(rgb,float3(0.95,0.99,1.0),min(1.0,glint+lower*0.35));
+    float alpha=(rim*0.36+glint*0.72+lower*0.18)*coverage*r.fade;
+    return float4(immerseInWater(rgb,r.world,u),min(alpha,0.82));
+}
+struct WaterParticle { float4 position [[position]]; float2 uv; };
 vertex WaterParticle particleVertex(uint id [[vertex_id]], uint instance [[instance_id]], constant TankUniforms &u [[buffer(1)]]) {
-    const float2 corners[] = {float2(-1,-1), float2(1,-1), float2(-1,1), float2(-1,1), float2(1,-1), float2(1,1)};
-    float seed = float(instance); bool bubble = instance < 18;
-    float x = bubble ? 6.1 + sin(seed * 2.3) * 0.28 : fract(seed * 0.618) * 15.0 - 7.5;
-    float y = fract(seed * 0.173 + u.options.x * (bubble ? 0.045 : 0.008)) * 9.0 - 3.6;
-    float z = bubble ? 3.1 + sin(seed * 1.7) * 0.2 : fract(seed * 0.381) * 6.0 - 1.5;
-    x += sin(u.options.x * 0.65 + seed + y) * (bubble ? 0.10 : 0.04);
-    float radius = bubble ? 0.025 + fract(seed * 0.23) * 0.032 : 0.014;
-    float2 uv = corners[id];
-    float3 p = float3(x, y, z) + float3(uv * radius, 0);
-    return {u.viewProjection * float4(p, 1), uv, bubble ? 0.14 : 0.045, bubble ? 1.0 : 0.0};
+    const float2 corners[]={float2(-1,-1),float2(1,-1),float2(-1,1),float2(-1,1),float2(1,-1),float2(1,1)};
+    float seed=float(instance)+80;
+    float y=fract(seed*0.173+u.options.x*0.003)*9.0-3.6;
+    float x=u.camera.x+fract(seed*0.618)*15.0-7.5+sin(u.options.x*0.65+seed+y)*0.04;
+    float z=fract(seed*0.381)*6.0-1.5;
+    float radius=0.007+fract(seed*0.37)*0.005;
+    float2 uv=corners[id];
+    return {u.viewProjection*float4(float3(x,y,z)+float3(uv*radius,0),1),uv};
 }
 fragment float4 particleFragment(WaterParticle r [[stage_in]]) {
-    float d = length(r.uv); if (d > 1.0) discard_fragment();
-    float rim = r.bubble > 0.5 ? smoothstep(0.65, 0.9, d) * (1.0 - smoothstep(0.9, 1.0, d)) : exp(-d * d * 4.0);
-    return float4(0.59, 0.82, 0.86, rim * r.alpha);
+    float d=length(r.uv); if (d>1.0) discard_fragment();
+    return float4(0.59,0.82,0.86,exp(-d*d*4.0)*0.018);
 }
 
 // Original parametric Aurelia study: no downloaded mesh or photographic texture.
@@ -232,8 +236,10 @@ float3 moonRotate(float3 p, float tilt, float roll) {
 vertex MoonJellyRaster moonJellyVertex(uint id [[vertex_id]], uint instance [[instance_id]], constant TankUniforms &u [[buffer(1)]]) {
     constexpr float pi = 3.14159265359;
     const float2 corners[] = {float2(0,0), float2(1,0), float2(0,1), float2(0,1), float2(1,0), float2(1,1)};
-    const float xs[] = {-2.6, 2.7, 0.2, -3.2, 3.4};
-    const float sizes[] = {1.02, 0.87, 0.76, 0.61, 0.64};
+    const float xs[] = {-4.8, 2.7, 0.2, -3.2, 3.4};
+    const float sizes[] = {0.86, 0.68, 0.55, 0.59, 0.52};
+    const float heights[] = {4.0, 4.05, 3.80, 3.5, 3.85};
+    const float depths[] = {-0.8, 1.2, -3.5, 0.2, -2.0};
     const float tilts[] = {0.48, 0.82, 1.02, 0.62, 0.9};
     float seed = float(instance) * 2.39996;
     float t = u.options.x, phase = t * (2.0 + float(instance) * 0.09) + seed;
@@ -287,8 +293,8 @@ vertex MoonJellyRaster moonJellyVertex(uint id [[vertex_id]], uint instance [[in
     float roll = sin(t * 0.12 + seed) * 0.14 + (float(instance) - 1.0) * 0.12;
     float tilt = tilts[instance] + sin(t * 0.09 + seed) * 0.12;
     float scale = sizes[instance] * 0.76;
-    float y = 3.6 + 0.30 * sin(seed);
-    float3 center = float3(xs[instance] + sin(t * 0.14 + seed) * 0.38, y + sin(t * 0.19 + seed) * 0.28 + sin(phase - 0.6) * 0.045, 2.0 + float(instance) * 1.15 + sin(t * 0.1 + seed) * 0.12);
+    float y = heights[instance];
+    float3 center = float3(u.camera.x + xs[instance] + sin(t * 0.14 + seed) * 0.38, y + sin(t * 0.19 + seed) * 0.28 + sin(phase - 0.6) * 0.045, depths[instance] + sin(t * 0.1 + seed) * 0.12);
     float3 world = moonRotate(p, tilt, roll) * scale + center;
     return {u.viewProjection * float4(world, 1), world, moonRotate(n, tilt, roll), local, uv, kind};
 }
@@ -317,18 +323,18 @@ fragment float4 moonJellyFragment(MoonJellyRaster r [[stage_in]], constant TankU
         }
         float sheen = pow(max(0.0, dot(reflect(-normalize(float3(-0.3,0.8,1.0)), normalize(r.normal)), view)), 20.0);
         float thickness = 0.035 + 0.028 * pow(max(0.0, 1.0 - radius), 2.0);
-        float alpha = thickness + fresnel * 0.20 + rim * 0.05 + canals
-            + organs * (0.16 + tissue * 0.035) + organSoft * 0.018;
-        float3 color = mix(float3(0.64,0.77,0.84), float3(0.78,0.72,0.80), saturate(organs * 0.6));
+        float alpha = thickness + fresnel * 0.14 + rim * 0.03 + canals
+            + organs * (0.11 + tissue * 0.025) + organSoft * 0.018;
+        float3 color = mix(float3(0.48,0.62,0.71), float3(0.65,0.61,0.70), saturate(organs * 0.45));
         color += sheen * 0.11 + rim * 0.05;
         if (r.kind == 3) alpha *= 0.40;
-        return float4(color, min(0.48, alpha));
+        return float4(immerseInWater(color,r.world,u), min(0.36, alpha)*0.82);
     }
     if (r.kind == 1) {
         float softEdge = 1.0 - smoothstep(0.55, 1.0, abs(r.uv.x));
         float folds = 0.5 + 0.5 * sin(r.uv.y * 48.0 + r.uv.x * 12.0);
         float lighting = 0.6 + 0.4 * abs(dot(normalize(r.normal), normalize(float3(-0.3,0.8,1.0))));
-        return float4(float3(0.78,0.79,0.83) * lighting, softEdge * (0.23 + folds * 0.09) * (1.0 - smoothstep(0.75,1.0,r.uv.y)));
+        return float4(immerseInWater(float3(0.78,0.79,0.83) * lighting,r.world,u), softEdge * (0.18 + folds * 0.065) * (1.0 - smoothstep(0.75,1.0,r.uv.y)));
     }
-    return float4(float3(0.72,0.85,0.91), (1.0 - abs(r.uv.x * 2.0 - 1.0)) * 0.32 * (1.0 - r.uv.y * 0.7));
+    return float4(immerseInWater(float3(0.72,0.85,0.91),r.world,u), (1.0 - abs(r.uv.x * 2.0 - 1.0)) * 0.21 * (1.0 - r.uv.y * 0.7));
 }

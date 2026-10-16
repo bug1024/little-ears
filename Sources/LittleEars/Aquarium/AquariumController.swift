@@ -186,7 +186,7 @@ final class AquariumController: ObservableObject {
 @MainActor
 final class AquariumMetalView: MTKView {
     var onWindowChange: (() -> Void)?
-    var maximumDimension: CGFloat = 1440
+    var maximumDimension: CGFloat = 2560
     func updateRenderLoop(animate: Bool, displayStaticFrame: Bool) {
         // enableSetNeedsDisplay=true pauses MetalKit's internal display loop, even
         // when isPaused is subsequently set to false. Use it only for static frames.

@@ -35,7 +35,7 @@ struct AquariumConfiguration: Codable, Equatable, Sendable {
     var totalFish: Int { fishCounts.values.reduce(0, +) }
     var framesPerSecond: Int { energySaving ? 24 : 30 }
     var shadowResolution: Int { energySaving ? 1024 : 2048 }
-    var maximumDrawableDimension: CGFloat { energySaving ? 960 : 1440 }
+    var maximumDrawableDimension: CGFloat { energySaving ? 1280 : 2560 }
 
     func normalized() -> Self {
         var value = self, remaining = Self.maximumFish
