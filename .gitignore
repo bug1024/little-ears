@@ -21,3 +21,6 @@ xcuserdata/
 /local-assets/
 __pycache__/
 *.pyc
+
+# Cached LRCLIB responses used by scripts/lyrics
+/scripts/lyrics/cache/

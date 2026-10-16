@@ -1,0 +1,9 @@
+{
+  "15. 其他/周杰伦 - 你比从前快乐.FLAC": {
+    "q": "你比从前快乐",
+    "track_name": "你比从前快乐",
+    "artist_name": "吴宗宪",
+    "ignore_duration": true,
+    "note": "LRCLIB 只有吴宗宪原唱版(288s)，本地是周杰伦版(202s)，同一首歌；经用户确认写入。track_name 索引查不到，必须走 q= 全文检索。"
+  }
+}

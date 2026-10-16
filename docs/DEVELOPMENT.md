@@ -79,3 +79,18 @@ swift test --filter AquariumTests
 GPU 绘制测试使用上述打包命令生成的场景资源；未提供资源或 Metal 设备时自动跳过，不依赖独立试验应用。
 
 气泡在中间偏右位置以 160 个独立实例绘制，按各自速度上升并轻微横向漂移；细环、高光与透明中心由着色器生成，不再连续铺设密集气泡贴图。气泡受场景深度遮挡，稀疏悬浮微粒单独绘制。鱼体光纹采用原始 Fish 顶点／片元着色器中的两次采样加法结构，光源方向与强度按当前场景校准，不代表已恢复原程序全部运行参数或动画。
+
+## 本地歌词文件准备
+
+```sh
+python3 -I scripts/lyrics/fetch_lyrics.py --root ~/Documents/musics/jay --dry-run
+python3 -I scripts/lyrics/fetch_lyrics.py --root ~/Documents/musics/jay
+swift scripts/lyrics/convert_hant.swift ~/Documents/musics/jay .lyrics-hant-backup
+python3 -I scripts/lyrics/verify.py ~/Documents/musics/jay
+```
+
+从 LRCLIB 为本地音乐目录补齐 sidecar `.lrc`，供应用「批量导入」使用；应用自身不联网。歌词与音频文件同目录同名，这正是批量导入优先匹配的规则（同目录 + 同文件名），同曲多格式共用一个歌词文件。`[ar:]/[ti:]/[al:]` 一律取自音频文件自身的标签，不使用 LRCLIB 的专辑字段。同步歌词优先，只有纯文本时按无时间轴歌词写入。
+
+匹配结果按字典序元组排序而非加权求和，优先级不可互相抵消：有时间轴 > 时长同档 > 时间戳单调 > 简体 > 时长差最近 > 标题与歌手吻合。时长相差超过 5 秒直接排除。`/api/get` 对合法查询也会返回 503，只作兜底，以 `/api/search` 为主；`track_name` 索引有缺口，某首歌可能只有 `q=` 全文检索能找到，因此空数组（而非 503）才是"确实没有"的判据。`scripts/lyrics/overrides.json` 登记少数本地版本与 LRCLIB 记录时长或署名歌手不一致的曲目。
+
+繁转简使用 macOS 自带 ICU `Hant-Hans`（整目录单进程），只改汉字，时间戳与标签原样保留；第二个参数传入备份目录，使回退副本保持繁体原文。ICU 有意保留 `妳`，不算转换遗漏。响应缓存在被忽略的 `scripts/lyrics/cache/`，重跑与重新打分不产生额外请求。细节见 [`scripts/lyrics/README.md`](../scripts/lyrics/README.md)。

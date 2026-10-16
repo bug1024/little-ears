@@ -87,6 +87,46 @@ final class LyricsTests: XCTestCase {
         XCTAssertEqual(restored.records.count, 6) // Unlink retains imported text.
     }
     @MainActor
+    func testBatchOverwriteRequiresOptInAndKeepsAmbiguousOrInvalidFiles() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let db = try LibraryDatabase(path: directory.appendingPathComponent("library.sqlite").path)
+        try await db.saveSource(LibrarySource(id: "local", path: directory.path, bookmark: Data(), name: "Music"))
+        let song = track("song", "Song.flac", "Song")
+        try await db.scanResult(sourceID: "local", scanned: [song])
+        let file = directory.appendingPathComponent("Song.lrc")
+        try "[00:01]Original".write(to: file, atomically: true, encoding: .utf8)
+        let library = LyricsLibrary(); try await library.configure(db)
+        await library.importFiles([file], tracks: [song], roots: [:])
+        let original = try XCTUnwrap(library.record(for: song.id))
+        try "[00:02]Updated".write(to: file, atomically: true, encoding: .utf8)
+        await library.importFiles([file], tracks: [song], roots: [:])
+        XCTAssertEqual(library.record(for: song.id)?.id, original.id)
+        XCTAssertTrue(library.message?.contains("保留原关联 1 个") == true)
+        // A previously imported, unlinked revision must not block this explicit replacement.
+        await library.importFiles([file], tracks: [song], roots: [:], overwriteExisting: true)
+        let updated = try XCTUnwrap(library.record(for: song.id))
+        XCTAssertNotEqual(updated.id, original.id)
+        XCTAssertEqual(library.document(for: updated).lines.first?.text, "Updated")
+        XCTAssertTrue(library.message?.contains("替换 1 个") == true)
+        XCTAssertNil(library.records.first { $0.id == original.id }?.trackID)
+        await library.importFiles([file], tracks: [song], roots: [:], overwriteExisting: true)
+        XCTAssertEqual(library.records.count, 2) // Reimporting unchanged text is idempotent.
+        let duplicate = directory.appendingPathComponent("Song.txt")
+        try "Conflicting candidate".write(to: duplicate, atomically: true, encoding: .utf8)
+        try "[00:03]Third revision".write(to: file, atomically: true, encoding: .utf8)
+        await library.importFiles([file, duplicate], tracks: [song], roots: [:], overwriteExisting: true)
+        XCTAssertEqual(library.record(for: song.id)?.id, updated.id)
+        try "[ti:Song]".write(to: file, atomically: true, encoding: .utf8)
+        await library.importFiles([file], tracks: [song], roots: [:], overwriteExisting: true)
+        XCTAssertEqual(library.record(for: song.id)?.id, updated.id)
+        XCTAssertTrue(library.message?.contains("无法读取有效歌词") == true)
+        let restored = LyricsLibrary()
+        try await restored.configure(LibraryDatabase(path: directory.appendingPathComponent("library.sqlite").path))
+        XCTAssertEqual(restored.record(for: song.id)?.id, updated.id)
+    }
+    @MainActor
     func testUTF16ImportAndEmptyFilesDoNotReplaceLyrics() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

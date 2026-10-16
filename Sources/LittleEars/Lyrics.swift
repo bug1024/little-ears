@@ -145,12 +145,19 @@ final class LyricsLibrary: ObservableObject {
         panel.title = target == nil ? "导入歌词文件或文件夹" : "为当前音频关联歌词"
         panel.canChooseDirectories = target == nil; panel.canChooseFiles = true
         panel.allowsMultipleSelection = target == nil
-        panel.message = "支持 LRC 时间轴歌词和 TXT 纯文本。批量导入会自动匹配，已有歌词不会被自动覆盖。"
+        panel.message = "支持 LRC 时间轴歌词和 TXT 纯文本。批量导入会自动匹配；匹配不明确或读取失败时保留原歌词。"
+        let overwrite = NSButton(checkboxWithTitle: "覆盖已关联歌词", target: nil, action: nil)
+        overwrite.state = .off
+        overwrite.toolTip = "仅用本次唯一匹配且解析有效的歌词替换已有歌词，原导入记录仍保留。"
+        if target == nil {
+            panel.accessoryView = overwrite
+            panel.isAccessoryViewDisclosed = true
+        }
         guard panel.runModal() == .OK else { return }
         let urls = panel.urls
-        Task { await importFiles(urls, tracks: tracks, roots: roots, target: target); completion() }
+        Task { await importFiles(urls, tracks: tracks, roots: roots, target: target, overwriteExisting: overwrite.state == .on); completion() }
     }
-    func importFiles(_ urls: [URL], tracks: [Track], roots: [String: String], target: Track? = nil) async {
+    func importFiles(_ urls: [URL], tracks: [Track], roots: [String: String], target: Track? = nil, overwriteExisting: Bool = false) async {
         guard !importing, let database else { return }
         importing = true
         defer { importing = false }
@@ -161,7 +168,10 @@ final class LyricsLibrary: ObservableObject {
                 if let existing = records.first(where: { $0.sourcePath == incoming.sourcePath && $0.text == incoming.text }) { batch.append(existing) }
                 else { batch.append(incoming) }
             }
-            let pending = Dictionary((records + batch).filter { $0.trackID == nil }.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+            // In replacement mode, only this import participates in duplicate detection.
+            // Older, unlinked revisions must not block an explicitly requested replacement.
+            let matchingRecords = overwriteExisting ? batch : records + batch
+            let pending = Dictionary(matchingRecords.filter { overwriteExisting || $0.trackID == nil }.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
             let proposed = await Task.detached(priority: .userInitiated) {
                 var matchesByTrack: [String: [String]] = [:]
                 for record in pending.values {
@@ -170,20 +180,24 @@ final class LyricsLibrary: ObservableObject {
                 }
                 return matchesByTrack
             }.value
-            var matched = 0
+            var matched = 0, replaced = 0, kept = 0
             for index in batch.indices {
                 if let target, batch.count == 1 {
                     batch[index].trackID = target.id; matched += 1
                 } else if batch[index].trackID == nil {
                     let candidates = proposed.filter { $0.value == [batch[index].id] }
-                    // An existing association always wins over automatic import.
-                    if let id = candidates.keys.first, !records.contains(where: { $0.trackID == id }) { batch[index].trackID = id; matched += 1 }
-                }
+                    if let id = candidates.keys.first {
+                        if records.contains(where: { $0.trackID == id }) {
+                            if overwriteExisting { batch[index].trackID = id; replaced += 1 }
+                            else { kept += 1 }
+                        } else { batch[index].trackID = id; matched += 1 }
+                    }
+                } else { kept += 1 }
             }
-            try await database.saveLyrics(batch, replacing: target != nil)
+            try await database.saveLyrics(batch, replacing: target != nil || overwriteExisting)
             try await reload()
             let linked = batch.filter { $0.trackID != nil }.count
-            message = "导入 \(batch.count) 个 · 已关联 \(linked) 个（本次新增 \(matched) 个）· 待关联 \(batch.count - linked) 个" + (result.errors.isEmpty ? "" : "\n未导入：" + result.errors.joined(separator: "；"))
+            message = "导入 \(batch.count) 个 · 新增关联 \(matched) 个 · 替换 \(replaced) 个 · 保留原关联 \(kept) 个 · 待关联 \(batch.count - linked) 个" + (result.errors.isEmpty ? "" : "\n未导入：" + result.errors.joined(separator: "；"))
         } catch { message = "导入失败：\(error.localizedDescription)" }
     }
     nonisolated private static func readFiles(_ urls: [URL]) -> (records: [LyricRecord], errors: [String]) {
