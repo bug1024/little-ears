@@ -58,9 +58,37 @@ actor LibraryDatabase {
                 try db.execute(sql: "UPDATE playlists SET position = ? WHERE id = ?", arguments: [position, id])
             }
         }
+        migrations.registerMigration("v5-local-lyrics") { db in
+            try db.create(table: "lyrics") { t in
+                t.column("id", .text).primaryKey()
+                t.column("filename", .text).notNull()
+                t.column("sourcePath", .text).notNull()
+                t.column("text", .text).notNull()
+                t.column("trackID", .text).unique().references("tracks", onDelete: .setNull)
+            }
+        }
         try migrations.migrate(db)
         try db.write { db in
             try db.execute(sql: "UPDATE sessions SET endedAt = COALESCE(checkpointAt, startedAt), endReason = 'interrupted' WHERE endedAt IS NULL")
+        }
+    }
+    func loadLyrics() throws -> [LyricRecord] {
+        try db.read { try LyricRecord.order(Column("filename"), Column("id")).fetchAll($0) }
+    }
+    func saveLyrics(_ records: [LyricRecord], replacing: Bool = false) throws {
+        try db.write { db in
+            for record in records {
+                if replacing, let trackID = record.trackID {
+                    try db.execute(sql: "UPDATE lyrics SET trackID = NULL WHERE trackID = ? AND id != ?", arguments: [trackID, record.id])
+                }
+                try record.save(db)
+            }
+        }
+    }
+    func associateLyric(recordID: String, trackID: String?) throws {
+        try db.write { db in
+            if let trackID { try db.execute(sql: "UPDATE lyrics SET trackID = NULL WHERE trackID = ?", arguments: [trackID]) }
+            try db.execute(sql: "UPDATE lyrics SET trackID = ? WHERE id = ?", arguments: [trackID, recordID])
         }
     }
     func loadLibrary() throws -> ([LibrarySource], [Track]) {

@@ -424,6 +424,7 @@ struct NowPlayingView: View {
     @AppStorage("playingVisualization") var visualization = "spectrum"
     var spectrumPreferences = SpectrumPreferences()
     @State private var showingSpectrumSettings = false
+    @AppStorage("playingSidePanel") var sidePanel = "queue"
     @State private var showingAquariumSettings = false
     let palette: Palette
     @State private var draggedID: String?
@@ -497,6 +498,11 @@ struct NowPlayingView: View {
                             Text(model.currentTrack?.folder ?? "从音乐库选择音频开始播放").font(.system(size: 11)).foregroundStyle(palette.secondary).lineLimit(1)
                         }
                         Spacer(minLength: 0)
+                        if sidePanel != "lyrics", let track = model.currentTrack {
+                            CompactLyricsView(library: model.lyrics, position: model.playbackPosition, trackID: track.id, palette: palette) { sidePanel = "lyrics" }
+                                .frame(minWidth: 100, maxWidth: .infinity, alignment: .leading)
+                                .layoutPriority(-1)
+                        }
                         if let track = model.currentTrack {
                             Button { showingInfo.toggle() } label: { FormatBadge(title: track.format, palette: palette) }
                                 .buttonStyle(.plain).help("音频信息").accessibilityLabel("音频信息")
@@ -514,7 +520,12 @@ struct NowPlayingView: View {
                     }
                 }.padding(22).modifier(MaterialSurface(palette: palette, radius: 16, inset: true)).padding(16).frame(maxWidth: .infinity)
                 Rectangle().fill(palette.border).frame(width: 1)
-                queuePanel.frame(width: 264).background(LinearGradient(colors: [palette.surface.opacity(0.55), palette.background], startPoint: .top, endPoint: .bottom))
+                VStack(spacing: 0) {
+                    Picker("播放侧栏", selection: $sidePanel) { Text("队列").tag("queue"); Text("歌词").tag("lyrics") }
+                        .labelsHidden().pickerStyle(.segmented).controlSize(.small).padding(.horizontal, 14).padding(.vertical, 10)
+                    if sidePanel == "lyrics" { LyricsPanel(library: model.lyrics, palette: palette) }
+                    else { queuePanel }
+                }.frame(width: 264).background(LinearGradient(colors: [palette.surface.opacity(0.55), palette.background], startPoint: .top, endPoint: .bottom))
             }
         }.onAppear { model.setSpectrumVisible(visualization == "spectrum") }
             .onDisappear { model.setSpectrumVisible(false) }

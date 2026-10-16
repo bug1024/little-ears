@@ -47,6 +47,7 @@ final class AppModel: ObservableObject {
     let sleepTimer: SleepTimerManager
     @Published var trackDetailsTarget: TrackDetailsTarget?
     @Published var listeningDayTarget: ListeningCalendarDay?
+    let lyrics = LyricsLibrary()
     let spectrumDisplay = SpectrumDisplay()
     let aquarium = AquariumController()
     private var spectrumRequested = false
@@ -142,6 +143,7 @@ final class AppModel: ObservableObject {
             let databasePath = databasePath ?? directory.appendingPathComponent("library.sqlite").path
             let db = try await Task.detached { try LibraryDatabase(path: databasePath, copyingHistoryFrom: historySnapshotPath) }.value
             database = db
+            try await lyrics.configure(db)
             let library = try await db.loadLibrary(); sources = library.0; tracks = library.1
             for var source in sources {
                 do {
