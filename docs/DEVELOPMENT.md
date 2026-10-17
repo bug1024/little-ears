@@ -20,6 +20,15 @@ open "build/Little Ears.app"
 
 构建脚本生成当前机器架构的本地签名应用，不包含 Developer ID 签名、公证或通用架构打包。
 
+制作本地 DMG（包含水族箱）：
+
+```sh
+bash scripts/build-dmg.sh --aquarium
+```
+
+脚本先构建 Release 应用，再生成 `build/Little-Ears-<版本>-<架构>.dmg` 和对应 `.sha256`，镜像包含应用、Applications 快捷方式与安装说明。不传 `--aquarium` 时不打包本地水族箱素材。测试资源 bundle、个人资料库和音乐不进入安装包；DMG 仍是本地测试签名，不代表已完成公证或完整性能验收。
+
+
 ## 真实音乐库测试
 
 ```sh

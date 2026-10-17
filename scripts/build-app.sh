@@ -20,7 +20,9 @@ cp "$bin_dir/LittleEars" "$app/Contents/MacOS/LittleEars"
 cp Resources/Info.plist "$app/Contents/Info.plist"
 cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 for bundle in "$bin_dir"/*.bundle; do
-    [ -d "$bundle" ] && cp -R "$bundle" "$app/Contents/Resources/"
+    [ -d "$bundle" ] || continue
+    case "$bundle" in *Tests.bundle) continue ;; esac
+    cp -R "$bundle" "$app/Contents/Resources/"
 done
 if [ "$with_aquarium" = true ]; then
     python3 scripts/aquarium-assets/convert_tank.py --source local-assets/MarineAquarium3 --output "$app/Contents/Resources/AquariumAssets"

@@ -79,11 +79,32 @@ enum AquariumResources {
         return url.flatMap { FileManager.default.fileExists(atPath: $0.appendingPathComponent("tank.json").path) ? $0 : nil }
     }
     static var shader: URL {
+        get throws { try shader(in: .main) }
+    }
+    static func shader(in application: Bundle) throws -> URL {
+        // SwiftPM's generated accessor checks beside the executable bundle and
+        // then the developer's build directory, not Contents/Resources in an app.
+        let packageName = "LittleEars_LittleEars.bundle"
+        let locations = [application.resourceURL?.appendingPathComponent(packageName),
+                         application.bundleURL.appendingPathComponent(packageName)]
+        for location in locations.compactMap({ $0 }) {
+            if let bundle = Bundle(url: location),
+               let url = bundle.url(forResource: "Fish", withExtension: "metal", subdirectory: "Shaders") {
+                return url
+            }
+        }
+        if let url = application.url(forResource: "Fish", withExtension: "metal", subdirectory: "Shaders") {
+            return url
+        }
         #if SWIFT_PACKAGE
-        return Bundle.module.url(forResource: "Fish", withExtension: "metal", subdirectory: "Shaders")!
-        #else
-        return Bundle.main.url(forResource: "Fish", withExtension: "metal", subdirectory: "Shaders")!
+        // Only command-line builds/tests may use SwiftPM's build-directory fallback.
+        if application.bundleURL.pathExtension != "app",
+           let url = Bundle.module.url(forResource: "Fish", withExtension: "metal", subdirectory: "Shaders") {
+            return url
+        }
         #endif
+        throw NSError(domain: "LittleEars.AquariumResources", code: 1,
+                      userInfo: [NSLocalizedDescriptionKey: "缺少水族箱着色器资源，请重新安装完整应用。"])
     }
     static func catalog(at assets: URL) throws -> [AquariumSpecies] {
         try JSONDecoder().decode([AquariumSpecies].self, from: Data(contentsOf: assets.appendingPathComponent("fish-species.json")))

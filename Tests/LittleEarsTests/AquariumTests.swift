@@ -4,6 +4,25 @@ import SwiftUI
 @testable import LittleEars
 
 final class AquariumTests: XCTestCase {
+    func testPackagedShaderResolvesWithoutDeveloperBuildDirectory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = root.appendingPathComponent("Little Ears.app")
+        let resources = app.appendingPathComponent("Contents/Resources")
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        let info: [String: Any] = ["CFBundleIdentifier": "test.aquarium.resources", "CFBundlePackageType": "APPL"]
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            .write(to: app.appendingPathComponent("Contents/Info.plist"))
+        let bundle = try XCTUnwrap(Bundle(url: app))
+        // Even on a developer machine, a broken app must report a recoverable error.
+        XCTAssertThrowsError(try AquariumResources.shader(in: bundle))
+        let shaders = resources.appendingPathComponent("LittleEars_LittleEars.bundle/Shaders")
+        try FileManager.default.createDirectory(at: shaders, withIntermediateDirectories: true)
+        let shader = shaders.appendingPathComponent("Fish.metal")
+        try Data("// packaged shader".utf8).write(to: shader)
+        XCTAssertEqual(try AquariumResources.shader(in: bundle).standardizedFileURL, shader.standardizedFileURL)
+    }
+
     func testOldScenePreferencesGainJelliesWithoutLosingUserChoices() throws {
         var previous = AquariumConfiguration()
         previous.fishCounts = [306: 2]; previous.ambientEnabled = true; previous.ambientVolume = 0.27; previous.energySaving = true

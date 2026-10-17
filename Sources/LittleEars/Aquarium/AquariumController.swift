@@ -32,8 +32,9 @@ final class AquariumController: ObservableObject {
         guard renderer == nil, !loading else { return }
         guard let assets else { error = "当前应用未包含水族箱场景资源。"; return }
         loading = true; error = nil
-        let config = configuration, shader = AquariumResources.shader
+        let config = configuration
         do {
+            let shader = try AquariumResources.shader
             let result = try await Task.detached(priority: .userInitiated) {
                 let catalog = try AquariumResources.catalog(at: assets)
                 let renderer = try TankRenderer(assets: assets, shader: shader, shadowResolution: config.shadowResolution, population: config.fishCounts)
