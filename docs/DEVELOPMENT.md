@@ -8,6 +8,8 @@
 
 可以用 Xcode 打开 `LittleEars.xcodeproj`，选择 LittleEars scheme 后运行；也可打开 `Package.swift`。
 
+现有 Xcode 工程包含水族箱子目录与着色器引用。`scripts/generate-project.py` 仅枚举顶层 Swift 文件，尚不能完整重建当前工程；不要用它直接覆盖已维护的工程文件。
+
 ## 命令行构建
 
 ```sh
@@ -39,6 +41,7 @@ swift build
 
 ## 工程文档
 
+- [功能实现说明](FEATURES.md)
 - [行为与设计决策](DECISIONS.md)
 - [视觉系统及验证记录](UI_DESIGN.md)
 - [导航性能与点击命中记录](PERFORMANCE.md)
@@ -80,15 +83,8 @@ GPU 绘制测试使用上述打包命令生成的场景资源；未提供资源�
 
 气泡在中间偏右位置以 160 个独立实例绘制，按各自速度上升并轻微横向漂移；细环、高光与透明中心由着色器生成，不再连续铺设密集气泡贴图。气泡受场景深度遮挡，稀疏悬浮微粒单独绘制。鱼体光纹采用原始 Fish 顶点／片元着色器中的两次采样加法结构，光源方向与强度按当前场景校准，不代表已恢复原程序全部运行参数或动画。
 
-## 本地歌词文件准备
+## 歌词
 
-```sh
-python3 -I scripts/lyrics/fetch_lyrics.py --root ~/Documents/musics/jay --dry-run
-python3 -I scripts/lyrics/fetch_lyrics.py --root ~/Documents/musics/jay
-swift scripts/lyrics/convert_hant.swift ~/Documents/musics/jay .lyrics-hant-backup
-python3 -I scripts/lyrics/verify.py ~/Documents/musics/jay
-```
+本地 LRC / TXT 的导入、匹配、持久化与验证入口见 [功能实现说明](FEATURES.md#本地歌词)。应用不调用在线歌词接口。
 
-从 LRCLIB 为本地音乐目录补齐 sidecar `.lrc`，供应用「批量导入」使用；应用自身不联网。歌词与音频文件同目录同名，正是批量导入优先匹配的规则（同目录 + 同文件名），同曲多格式共用一个歌词文件；`[ar:]/[ti:]/[al:]` 取自音频文件自身的标签，不使用 LRCLIB 的专辑字段。
-
-整目录先 `fetch_lyrics.py` 落盘、再 `convert_hant.swift` 繁转简，两步顺序不可颠倒：重抓会把 LRCLIB 的繁体原文写回，必须再转换一次。转换的第二个参数是备份目录，使回退副本保持繁体原文；ICU 有意保留 `妳`，不算转换遗漏。匹配优先级、LRCLIB 接口的已知问题、登记个别曲目的 `overrides.json` 与响应缓存见 [`scripts/lyrics/README.md`](../scripts/lyrics/README.md)。
+为本地音乐准备歌词文件的独立命令行工具见 [歌词处理脚本](../scripts/lyrics/README.md)，包含 LRCLIB 查询、繁转简与文件检查；脚本的网络访问和磁盘写入独立于应用。

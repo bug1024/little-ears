@@ -1,4 +1,8 @@
-# M1 实施约定
+# 行为与设计决策
+
+当前功能以 [README](../README.md) 和 [功能实现说明](FEATURES.md) 为准。以下 M1 与版本章节保留对应阶段的决策背景。
+
+## M1 实施约定
 
 本次交付可运行的原生 macOS 14+ 首版，优先验证真实音频导入与日常播放体验。采用 SwiftUI、AVAudioEngine / AVAudioPlayerNode、SQLite / GRDB。开发依赖需首次联网下载，应用运行完全离线。
 
