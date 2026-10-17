@@ -243,6 +243,7 @@ final class TankRenderer: NSObject, MTKViewDelegate {
         encodeShadows(command)
         guard let e = command.makeRenderCommandEncoder(descriptor: pass) else { return }
         encode(e, width: Int(view.drawableSize.width), height: Int(view.drawableSize.height)); e.endEncoding()
+        if PerformanceSession.enabled { PerformanceSession.track(command: command) }
         command.present(drawable); command.commit()
     }
 

@@ -156,7 +156,12 @@ final class AppModel: ObservableObject {
                         source.path = url.path
                         try await db.saveSource(source)
                     }
-                } catch { errorMessage = "无法访问 \(source.name)，请重新授权目录。\(error.localizedDescription)" }
+                } catch {
+                    if PerformanceSession.enabled, FileManager.default.fileExists(atPath: source.path) {
+                        // The profiling bundle has a different signing identity. Never rewrite the source bookmark.
+                        roots[source.id] = URL(fileURLWithPath: source.path)
+                    } else { errorMessage = "无法访问 \(source.name)，请重新授权目录。\(error.localizedDescription)" }
+                }
             }
             if let saved = try await db.snapshot() {
                 queue = saved.queue; currentID = saved.currentID; position = saved.position

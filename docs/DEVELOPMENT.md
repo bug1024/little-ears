@@ -44,7 +44,7 @@ swift build
 - [功能实现说明](FEATURES.md)
 - [行为与设计决策](DECISIONS.md)
 - [视觉系统及验证记录](UI_DESIGN.md)
-- [导航性能与点击命中记录](PERFORMANCE.md)
+- [发布前性能测试与导航基准](PERFORMANCE.md)
 
 `--spectrum-motion` 额外生成真实播放器视图的 GIF 和逐帧 FFT 数值 JSON，覆盖开始、暂停、恢复、跳转及切歌。输出静音，分析使用音量调节前 PCM；GIF 是低帧率采样预览，不能当作实际渲染帧率的测量。
 
@@ -88,3 +88,8 @@ GPU 绘制测试使用上述打包命令生成的场景资源；未提供资源�
 本地 LRC / TXT 的导入、匹配、持久化与验证入口见 [功能实现说明](FEATURES.md#本地歌词)。应用不调用在线歌词接口。
 
 为本地音乐准备歌词文件的独立命令行工具见 [歌词处理脚本](../scripts/lyrics/README.md)，包含 LRCLIB 查询、繁转简与文件检查；脚本的网络访问和磁盘写入独立于应用。
+
+
+## 性能验证
+
+发布前结果与尚未完成的验收项见 [性能测量](PERFORMANCE.md)；独立资料库副本、进程采样和可选组件基准的复测方法见 [性能工具说明](../scripts/performance/README.md)。性能工具不在正常运行时采样，测试 app 与正式 app 的偏好和资料库分离。

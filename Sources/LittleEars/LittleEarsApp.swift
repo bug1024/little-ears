@@ -31,6 +31,16 @@ struct LittleEarsApp: App {
             let instance = AppModel(databasePath: ":memory:", remoteControls: false)
             _model = StateObject(wrappedValue: instance)
             Task { @MainActor in await PreviewRenderer.measureNavigation(libraryPath: path, model: instance) }
+        } else if let index = CommandLine.arguments.firstIndex(of: "--performance-session"), CommandLine.arguments.count > index + 1 {
+            guard Bundle.main.bundleIdentifier?.hasSuffix(".performance") == true else {
+                fputs("Performance sessions require an isolated .performance bundle identifier.\n", stderr); exit(2)
+            }
+            let directory = CommandLine.arguments[index + 1]
+            let historyIndex = CommandLine.arguments.firstIndex(of: "--performance-history")
+            let historyPath = historyIndex.flatMap { CommandLine.arguments.indices.contains($0 + 1) ? CommandLine.arguments[$0 + 1] : nil }
+            let instance = AppModel(databasePath: URL(fileURLWithPath: directory).appendingPathComponent("library.sqlite").path, remoteControls: false, historySnapshotPath: historyPath)
+            _model = StateObject(wrappedValue: instance)
+            Task { @MainActor in await PerformanceSession.start(directory: directory, model: instance) }
         } else { _model = StateObject(wrappedValue: AppModel()) }
     }
     var body: some Scene {
